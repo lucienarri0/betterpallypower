@@ -290,7 +290,7 @@ PallyPower.AuraIcons = PallyPower.isWrath and {
 -- XML Aliases
 do
 	PallyPower.GetAddOnMetadata = _G.GetAddOnMetadata or C_AddOns.GetAddOnMetadata
-	local version = string.trim(PallyPower.GetAddOnMetadata("PallyPower", "Version"))
+	local version = string.trim(PallyPower.GetAddOnMetadata("betterpallypower", "Version") or PallyPower.GetAddOnMetadata("PallyPower", "Version") or "unknown")
 	if version == ("@project-".."version@") then -- split string so it doesn't get replaced by packager
 		version = "Development version"
 	end
@@ -445,13 +445,13 @@ PallyPower.Cooldowns = {
 -------------------------------------------------------------------
 PallyPower.Skins = {
 	["None"]			= "Interface\\Tooltips\\UI-Tooltip-Background",
-	["Banto"]			= "Interface\\AddOns\\PallyPower\\Skins\\Banto",
-	["BantoBarReverse"]	= "Interface\\AddOns\\PallyPower\\Skins\\BantoBarReverse",
-	["Glaze"]			= "Interface\\AddOns\\PallyPower\\Skins\\Glaze",
-	["Gloss"]			= "Interface\\AddOns\\PallyPower\\Skins\\Gloss",
-	["Healbot"]			= "Interface\\AddOns\\PallyPower\\Skins\\Healbot",
-	["oCB"]				= "Interface\\AddOns\\PallyPower\\Skins\\oCB",
-	["Smooth"]			= "Interface\\AddOns\\PallyPower\\Skins\\Smooth"
+	["Banto"]			= "Interface\\AddOns\\betterpallypower\\Skins\\Banto",
+	["BantoBarReverse"]	= "Interface\\AddOns\\betterpallypower\\Skins\\BantoBarReverse",
+	["Glaze"]			= "Interface\\AddOns\\betterpallypower\\Skins\\Glaze",
+	["Gloss"]			= "Interface\\AddOns\\betterpallypower\\Skins\\Gloss",
+	["Healbot"]			= "Interface\\AddOns\\betterpallypower\\Skins\\Healbot",
+	["oCB"]				= "Interface\\AddOns\\betterpallypower\\Skins\\oCB",
+	["Smooth"]			= "Interface\\AddOns\\betterpallypower\\Skins\\Smooth"
 }
 
 PallyPower.Edge = "Interface\\Tooltips\\UI-Tooltip-Border"

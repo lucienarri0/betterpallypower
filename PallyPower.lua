@@ -102,13 +102,13 @@ function PallyPower:OnInitialize()
 	self.optionsFrame = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("PallyPower", "PallyPower")
 
 	LSM3:Register("background", "None", "Interface\\Tooltips\\UI-Tooltip-Background")
-	LSM3:Register("background", "Banto", "Interface\\AddOns\\PallyPower\\Skins\\Banto")
-	LSM3:Register("background", "BantoBarReverse", "Interface\\AddOns\\PallyPower\\Skins\\BantoBarReverse")
-	LSM3:Register("background", "Glaze", "Interface\\AddOns\\PallyPower\\Skins\\Glaze")
-	LSM3:Register("background", "Gloss", "Interface\\AddOns\\PallyPower\\Skins\\Gloss")
-	LSM3:Register("background", "Healbot", "Interface\\AddOns\\PallyPower\\Skins\\Healbot")
-	LSM3:Register("background", "oCB", "Interface\\AddOns\\PallyPower\\Skins\\oCB")
-	LSM3:Register("background", "Smooth", "Interface\\AddOns\\PallyPower\\Skins\\Smooth")
+	LSM3:Register("background", "Banto", "Interface\\AddOns\\betterpallypower\\Skins\\Banto")
+	LSM3:Register("background", "BantoBarReverse", "Interface\\AddOns\\betterpallypower\\Skins\\BantoBarReverse")
+	LSM3:Register("background", "Glaze", "Interface\\AddOns\\betterpallypower\\Skins\\Glaze")
+	LSM3:Register("background", "Gloss", "Interface\\AddOns\\betterpallypower\\Skins\\Gloss")
+	LSM3:Register("background", "Healbot", "Interface\\AddOns\\betterpallypower\\Skins\\Healbot")
+	LSM3:Register("background", "oCB", "Interface\\AddOns\\betterpallypower\\Skins\\oCB")
+	LSM3:Register("background", "Smooth", "Interface\\AddOns\\betterpallypower\\Skins\\Smooth")
 
 	self.zone = GetRealZoneText()
 
@@ -140,7 +140,7 @@ function PallyPower:OnInitialize()
 		{
 			["type"] = "data source",
 			["text"] = "PallyPower",
-			["icon"] = "Interface\\AddOns\\PallyPower\\Icons\\SummonChampion",
+			["icon"] = "Interface\\AddOns\\betterpallypower\\Icons\\SummonChampion",
 			["OnTooltipShow"] = function(tooltip)
 				if self.opt.ShowTooltips then
 					tooltip:SetText(PALLYPOWER_NAME)
