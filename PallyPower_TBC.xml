@@ -140,7 +140,7 @@
 		</KeyValues>
 		<Layers>
 			<Layer level = "OVERLAY">
-				<Texture name = "$parentIcon" file = "Interface\AddOns\PallyPower\Icons\SummonChampion">
+				<Texture name = "$parentIcon" file = "Interface\AddOns\betterpallypower\Icons\SummonChampion">
 					<Size>
 						<AbsDimension x = "26" y = "26"/>
 					</Size>
@@ -434,8 +434,8 @@
 				<Anchors>
 					<Anchor point = "CENTER" relativeTo = "$parent" relativePoint = "CENTER"/>
 				</Anchors>
-				<NormalTexture file = "Interface\AddOns\PallyPower\Icons\draghandle"/>
-				<CheckedTexture file = "Interface\AddOns\PallyPower\Icons\draghandle-checked"/>
+				<NormalTexture file = "Interface\AddOns\betterpallypower\Icons\draghandle"/>
+				<CheckedTexture file = "Interface\AddOns\betterpallypower\Icons\draghandle-checked"/>
 			</CheckButton>
 			<Frame name="PallyPowerHeader" toplevel="true" movable="true" enableMouse="true" resizable="true" frameStrata="LOW" inherits="SecureHandlerStateTemplate">
 				<Size x = "1" y = "1"/>
@@ -478,8 +478,8 @@
 				GameTooltip:Hide(self, motion);
 			</OnLeave>
 		</Scripts>
-		<NormalTexture file = "Interface\AddOns\PallyPower\Icons\ResizeGrip"/>
-		<HighlightTexture file = "Interface\AddOns\PallyPower\Icons\ResizeGrip" alphaMode = "ADD"/>
+		<NormalTexture file = "Interface\AddOns\betterpallypower\Icons\ResizeGrip"/>
+		<HighlightTexture file = "Interface\AddOns\betterpallypower\Icons\ResizeGrip" alphaMode = "ADD"/>
 	</Button>
 
 	<!-- PallyPower Blessing Assignments -->
@@ -778,7 +778,7 @@
 		</Size>
 		<Layers>
 			<Layer level = "ARTWORK">
-				<Texture name = "$parentIcon" file = "Interface\AddOns\PallyPower\Icons\AuraMastery">
+				<Texture name = "$parentIcon" file = "Interface\AddOns\betterpallypower\Icons\AuraMastery">
 					<Size>
 						<AbsDimension x = "32" y = "32"/>
 					</Size>
