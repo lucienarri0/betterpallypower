@@ -1928,6 +1928,93 @@
 					</OnLeave>
 				</Scripts>
 			</Button>
+			<EditBox name = "$parentManualPallyName" inherits = "InputBoxTemplate" autoFocus = "false">
+				<Size>
+					<AbsDimension x = "130" y = "20"/>
+				</Size>
+				<Anchors>
+					<Anchor point = "BOTTOMLEFT">
+						<Offset>
+							<AbsDimension x = "156" y = "7"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnEnterPressed>
+						PallyPowerBlessings_AddManualPally(self);
+					</OnEnterPressed>
+					<OnEscapePressed>
+						self:ClearFocus();
+					</OnEscapePressed>
+					<OnEnter>
+						if PallyPower.opt.ShowTooltips then
+							GameTooltip:SetOwner(self, "ANCHOR_BOTTOM");
+							GameTooltip:SetText(PALLYPOWER_MANUALPALLY_DESC);
+							GameTooltip:Show(self, motion);
+							CursorUpdate(self, motion);
+						end
+					</OnEnter>
+					<OnLeave>
+						GameTooltip:Hide(self, motion);
+					</OnLeave>
+				</Scripts>
+			</EditBox>
+			<Button name = "$parentManualPallyAdd" inherits = "GameMenuButtonTemplate" text = "PALLYPOWER_MANUALPALLY_ADD" hidden = "false">
+				<Size>
+					<AbsDimension x = "55" y = "20"/>
+				</Size>
+				<Anchors>
+					<Anchor point = "LEFT" relativeTo = "$parentManualPallyName" relativePoint = "RIGHT">
+						<Offset>
+							<AbsDimension x = "7" y = "0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						PallyPowerBlessings_AddManualPally(PallyPowerBlessingsFrameManualPallyName);
+					</OnClick>
+					<OnEnter>
+						if PallyPower.opt.ShowTooltips then
+							GameTooltip:SetOwner(self, "ANCHOR_BOTTOM");
+							GameTooltip:SetText(PALLYPOWER_MANUALPALLY_ADD_DESC);
+							GameTooltip:Show(self, motion);
+							CursorUpdate(self, motion);
+						end
+					</OnEnter>
+					<OnLeave>
+						GameTooltip:Hide(self, motion);
+					</OnLeave>
+				</Scripts>
+			</Button>
+			<Button name = "$parentManualPallyRemove" inherits = "GameMenuButtonTemplate" text = "PALLYPOWER_MANUALPALLY_REMOVE" hidden = "false">
+				<Size>
+					<AbsDimension x = "75" y = "20"/>
+				</Size>
+				<Anchors>
+					<Anchor point = "LEFT" relativeTo = "$parentManualPallyAdd" relativePoint = "RIGHT">
+						<Offset>
+							<AbsDimension x = "7" y = "0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						PallyPowerBlessings_RemoveManualPally(PallyPowerBlessingsFrameManualPallyName);
+					</OnClick>
+					<OnEnter>
+						if PallyPower.opt.ShowTooltips then
+							GameTooltip:SetOwner(self, "ANCHOR_BOTTOM");
+							GameTooltip:SetText(PALLYPOWER_MANUALPALLY_REMOVE_DESC);
+							GameTooltip:Show(self, motion);
+							CursorUpdate(self, motion);
+						end
+					</OnEnter>
+					<OnLeave>
+						GameTooltip:Hide(self, motion);
+					</OnLeave>
+				</Scripts>
+			</Button>
 			<CheckButton name = "$parentFreeAssign" inherits = "OptionsCheckButtonTemplate">
 				<Anchors>
 					<Anchor point = "BOTTOMLEFT">
@@ -1967,6 +2054,18 @@
 		</Frames>
 		<Layers>
 			<Layer level = "OVERLAY">
+				<FontString name = "$parentManualPallyText" inherits = "GameFontHighlightSmall" text = "PALLYPOWER_MANUALPALLY" justifyH = "LEFT">
+					<Size>
+						<AbsDimension x = "130" y = "16"/>
+					</Size>
+					<Anchors>
+						<Anchor point = "BOTTOMLEFT" relativeTo = "PallyPowerBlessingsFrame" relativePoint = "BOTTOMLEFT">
+							<Offset>
+								<AbsDimension x = "156" y = "28"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
 				<FontString name = "$parentFreeAssignText" inherits = "GameFontHighlightSmall" text = "PALLYPOWER_FREEASSIGN" justifyH = "LEFT">
 					<Size>
 						<AbsDimension x = "100" y = "16"/>

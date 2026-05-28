@@ -17,6 +17,7 @@ local tremove = table.remove
 local twipe = table.wipe
 local tsort = table.sort
 local strfind = string.find
+local strlower = string.lower
 local strsub = string.sub
 local format = string.format
 
@@ -28,6 +29,7 @@ PallyPower_Talents = {}
 PallyPower_Assignments = {}
 PallyPower_NormalAssignments = {}
 PallyPower_AuraAssignments = {}
+PallyPower_ManualPallys = PallyPower_ManualPallys or {}
 
 AllPallys = {}
 SyncList = {}
@@ -48,6 +50,7 @@ local roster = {}
 local raidmaintanks = {}
 local classmaintanks = {}
 local raidmainassists = {}
+local promotedManualPallys = {}
 
 local lastMsg = ""
 local prevBuffDuration
@@ -181,6 +184,9 @@ function PallyPower:OnInitialize()
 		PallyPower_SavedPresets["PallyPower_Assignments"] = {[0] = {}}
 		PallyPower_SavedPresets["PallyPower_NormalAssignments"] = {[0] = {}}
 		PallyPower_SavedPresets["PallyPower_AuraAssignments"] = {[0] = {}}
+	end
+	if not PallyPower_ManualPallys then
+		PallyPower_ManualPallys = {}
 	end
 	local h = _G["PallyPowerFrame"]
 	h:ClearAllPoints()
@@ -1578,6 +1584,7 @@ function PallyPower:GROUP_JOINED(event)
 	self:ScanSpells()
 	self:ScanCooldowns()
 	self:ScanInventory()
+	self:RestoreManualPallys()
 	C_Timer.After(
 		2.0,
 		function()
@@ -1600,6 +1607,9 @@ function PallyPower:GROUP_LEFT(event)
 		if pname == self.player then
 			match = true
 		end
+		if PallyPower_ManualPallys and PallyPower_ManualPallys[pname] then
+			match = true
+		end
 		for i = 1, GetNumGuildMembers() do
 			local name = Ambiguate(GetGuildRosterInfo(i), "short")
 			if pname == name then
@@ -1614,6 +1624,7 @@ function PallyPower:GROUP_LEFT(event)
 	self:ScanSpells()
 	self:ScanCooldowns()
 	self:ScanInventory()
+	self:RestoreManualPallys()
 	self:UpdateLayout()
 	self:UpdateRoster()
 end
@@ -1631,12 +1642,17 @@ function PallyPower:UpdateAllPallys()
 	end
 
 	local countAllPallys = 0
-	for _ in pairs(AllPallys) do countAllPallys = countAllPallys + 1 end
+	for _, info in pairs(AllPallys) do
+		if not (info and info.manual) then
+			countAllPallys = countAllPallys + 1
+		end
+	end
 
 	local found = 0
 	for _, unitid in pairs(units) do
 		if unitid and (not unitid:find("pet")) and UnitExists(unitid) then
-			if AllPallys[GetUnitName(unitid, true)] then found = found + 1 end
+			local name = self:RemoveRealmName(GetUnitName(unitid, true))
+			if AllPallys[name] and not AllPallys[name].manual then found = found + 1 end
 		end
 	end
 
@@ -1649,6 +1665,7 @@ function PallyPower:UpdateAllPallys()
 				self:ScanSpells()
 				self:ScanCooldowns()
 				self:ScanInventory()
+				self:RestoreManualPallys()
 				self:SendSelf()
 				self:SendMessage("REQ")
 				self:UpdateLayout()
@@ -1719,8 +1736,18 @@ function PallyPower:ParseMessage(sender, msg)
 	end
 
 	if strfind(msg, "^SELF") then
-		PallyPower_NormalAssignments[sender] = {}
-		PallyPower_Assignments[sender] = {}
+		local manualName = self:GetManualPallyKey(sender)
+		local promotedManual = promotedManualPallys[sender] or (AllPallys[sender] and AllPallys[sender].manual)
+		local keepName = manualName or (promotedManual and sender)
+		local keepAssignments = keepName and self:HasBlessingAssignments(keepName) and PallyPower_Assignments[keepName]
+		local keepNormalAssignments = keepName and PallyPower_NormalAssignments[keepName]
+		if manualName then
+			sender = self:PromoteManualPally(manualName, sender)
+		elseif promotedManual then
+			promotedManualPallys[sender] = nil
+		end
+		PallyPower_NormalAssignments[sender] = keepNormalAssignments or {}
+		PallyPower_Assignments[sender] = keepAssignments or {}
 		AllPallys[sender] = {}
 		self:SyncAdd(sender)
 		local _, _, numbers, assign = strfind(msg, "SELF ([0-9a-fn]*)@([0-9n]*)")
@@ -1733,7 +1760,7 @@ function PallyPower:ParseMessage(sender, msg)
 				AllPallys[sender][i].talent = tonumber(talent)
 			end
 		end
-		if assign then
+		if assign and not keepAssignments then
 			for i = 1, PALLYPOWER_MAXCLASSES do
 				local tmp = strsub(assign, i, i)
 				if tmp == "n" or tmp == "" then
@@ -1741,6 +1768,14 @@ function PallyPower:ParseMessage(sender, msg)
 				end
 				PallyPower_Assignments[sender][i] = tmp + 0
 			end
+		end
+		if keepAssignments and self:CheckLeader(self.player) then
+			C_Timer.After(
+				0.5,
+				function()
+					self:SendPallyAssignments(sender)
+				end
+			)
 		end
 	end
 
@@ -1963,6 +1998,15 @@ function PallyPower:SyncClear()
 	SyncList = {}
 end
 
+function PallyPower:SyncRemove(name)
+	for i, v in ipairs(SyncList) do
+		if v == name then
+			tremove(SyncList, i)
+			break
+		end
+	end
+end
+
 function PallyPower:SyncAdd(name)
 	local chk = 0
 	for _, v in ipairs(SyncList) do
@@ -2013,6 +2057,292 @@ function PallyPower:GetClassID(class)
 		end
 	end
 	return -1
+end
+
+function PallyPower:NormalizeManualPallyName(name)
+	if type(name) ~= "string" then return nil end
+
+	name = name:gsub("^%s+", ""):gsub("%s+$", "")
+	if name == "" then return nil end
+
+	return self:RemoveRealmName(name)
+end
+
+function PallyPower:GetManualPallyKey(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name or not PallyPower_ManualPallys then return nil end
+
+	local lowerName = strlower(name)
+	for manualName in pairs(PallyPower_ManualPallys) do
+		if strlower(manualName) == lowerName then
+			return manualName
+		end
+	end
+end
+
+function PallyPower:GetGroupUnitName(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name then return nil end
+
+	local lowerName = strlower(name)
+	local units = IsInRaid() and raid_units or party_units
+	for _, unitid in pairs(units) do
+		if unitid and (not unitid:find("pet")) and UnitExists(unitid) then
+			local unitName = self:RemoveRealmName(GetUnitName(unitid, true))
+			if unitName and strlower(unitName) == lowerName then
+				return unitName
+			end
+		end
+	end
+end
+
+function PallyPower:HasBlessingAssignments(name)
+	local assignments = PallyPower_Assignments[name]
+	if not assignments then return false end
+
+	for i = 1, PALLYPOWER_MAXCLASSES do
+		if assignments[i] and assignments[i] ~= 0 then
+			return true
+		end
+	end
+	return false
+end
+
+function PallyPower:EnsureManualAssignments(name)
+	if not PallyPower_Assignments[name] then
+		PallyPower_Assignments[name] = {}
+	end
+	for i = 1, PALLYPOWER_MAXCLASSES do
+		if PallyPower_Assignments[name][i] == nil then
+			PallyPower_Assignments[name][i] = 0
+		end
+	end
+	if not PallyPower_NormalAssignments[name] then
+		PallyPower_NormalAssignments[name] = {}
+	end
+	if PallyPower_AuraAssignments[name] == nil then
+		PallyPower_AuraAssignments[name] = 0
+	end
+end
+
+function PallyPower:EnsureManualPally(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name then return nil end
+
+	local groupName = self:GetGroupUnitName(name)
+	if groupName then
+		return self:PromoteManualPally(name, groupName)
+	end
+
+	if AllPallys[name] and not AllPallys[name].manual then
+		return name
+	end
+
+	local info = {
+		manual = true,
+		freeassign = true,
+		symbols = 0,
+		subgroup = AllPallys[self.player] and AllPallys[self.player].subgroup or 1,
+		AuraInfo = {},
+		CooldownInfo = {}
+	}
+	for i = 1, self.isWrath and 4 or 6 do
+		info[i] = {rank = 1, talent = 0}
+	end
+
+	AllPallys[name] = info
+	self:EnsureManualAssignments(name)
+	self:SyncAdd(name)
+	return name
+end
+
+function PallyPower:PromoteManualPally(manualName, groupName)
+	manualName = self:GetManualPallyKey(manualName) or self:NormalizeManualPallyName(manualName)
+	groupName = self:NormalizeManualPallyName(groupName) or manualName
+	if not manualName or not groupName then return nil end
+
+	local wasManual = (PallyPower_ManualPallys and PallyPower_ManualPallys[manualName]) or (AllPallys[manualName] and AllPallys[manualName].manual)
+	if PallyPower_ManualPallys then
+		PallyPower_ManualPallys[manualName] = nil
+	end
+
+	if manualName ~= groupName then
+		if PallyPower_Assignments[manualName] and not self:HasBlessingAssignments(groupName) then
+			PallyPower_Assignments[groupName] = PallyPower_Assignments[manualName]
+		end
+		PallyPower_Assignments[manualName] = nil
+
+		if PallyPower_NormalAssignments[manualName] then
+			if not PallyPower_NormalAssignments[groupName] then
+				PallyPower_NormalAssignments[groupName] = PallyPower_NormalAssignments[manualName]
+			else
+				for class, targets in pairs(PallyPower_NormalAssignments[manualName]) do
+					if not PallyPower_NormalAssignments[groupName][class] then
+						PallyPower_NormalAssignments[groupName][class] = targets
+					else
+						for target, blessing in pairs(targets) do
+							PallyPower_NormalAssignments[groupName][class][target] = blessing
+						end
+					end
+				end
+			end
+		end
+		PallyPower_NormalAssignments[manualName] = nil
+
+		if PallyPower_AuraAssignments[manualName] and (not PallyPower_AuraAssignments[groupName] or PallyPower_AuraAssignments[groupName] == 0) then
+			PallyPower_AuraAssignments[groupName] = PallyPower_AuraAssignments[manualName]
+		end
+		PallyPower_AuraAssignments[manualName] = nil
+
+		if AllPallys[manualName] and not AllPallys[groupName] then
+			AllPallys[groupName] = AllPallys[manualName]
+		end
+		AllPallys[manualName] = nil
+		self:SyncRemove(manualName)
+	end
+
+	if AllPallys[groupName] then
+		AllPallys[groupName].manual = nil
+	end
+	self:EnsureManualAssignments(groupName)
+	self:SyncAdd(groupName)
+	if wasManual then
+		promotedManualPallys[groupName] = true
+	end
+	return groupName
+end
+
+function PallyPower:RestoreManualPallys()
+	if not PallyPower_ManualPallys then
+		PallyPower_ManualPallys = {}
+		return
+	end
+
+	local manualNames = {}
+	for name in pairs(PallyPower_ManualPallys) do
+		tinsert(manualNames, name)
+	end
+
+	for _, name in ipairs(manualNames) do
+		local groupName = self:GetGroupUnitName(name)
+		if groupName then
+			local hadAssignments = self:HasBlessingAssignments(name)
+			local promotedName = self:PromoteManualPally(name, groupName)
+			if hadAssignments and promotedName and self:CheckLeader(self.player) then
+				C_Timer.After(
+					0.5,
+					function()
+						self:SendPallyAssignments(promotedName)
+					end
+				)
+			end
+		else
+			self:EnsureManualPally(name)
+		end
+	end
+end
+
+function PallyPower:AddManualPally(name)
+	if InCombatLockdown() then return false end
+
+	name = self:NormalizeManualPallyName(name)
+	if not name then return false end
+
+	local groupName = self:GetGroupUnitName(name)
+	if groupName then
+		self:Print(format(L["%s is already in your group."], groupName))
+		return false
+	end
+
+	local manualName = self:GetManualPallyKey(name) or name
+	PallyPower_ManualPallys[manualName] = true
+	self:EnsureManualPally(manualName)
+	self:UpdateLayout()
+	return true
+end
+
+function PallyPower:RemoveManualPally(name)
+	if InCombatLockdown() then return false end
+
+	name = self:NormalizeManualPallyName(name)
+	if not name then return false end
+
+	local manualName = self:GetManualPallyKey(name) or name
+	local groupName = self:GetGroupUnitName(manualName)
+	if groupName then
+		self:Print(format(L["%s is already in your group and cannot be removed manually."], groupName))
+		return false
+	end
+	if not PallyPower_ManualPallys[manualName] then
+		self:Print(format(L["%s is not a manual Paladin."], manualName))
+		return false
+	end
+
+	PallyPower_ManualPallys[manualName] = nil
+	AllPallys[manualName] = nil
+	PallyPower_Assignments[manualName] = nil
+	PallyPower_NormalAssignments[manualName] = nil
+	PallyPower_AuraAssignments[manualName] = nil
+	self:SyncRemove(manualName)
+	self:UpdateLayout()
+	return true
+end
+
+function PallyPower:SendPallyAssignments(name, target)
+	name = self:NormalizeManualPallyName(name)
+	if not name or not PallyPower_Assignments[name] then return end
+
+	local s = ""
+	local BuffInfo = PallyPower_Assignments[name]
+	for i = 1, PALLYPOWER_MAXCLASSES do
+		if not BuffInfo[i] or BuffInfo[i] == 0 then
+			s = s .. "n"
+		else
+			s = s .. BuffInfo[i]
+		end
+	end
+	self:SendMessage("PASSIGN " .. name .. "@" .. s, target and "WHISPER" or nil, target)
+
+	if PallyPower_AuraAssignments[name] then
+		self:SendMessage("AASSIGN " .. name .. " " .. PallyPower_AuraAssignments[name], target and "WHISPER" or nil, target)
+	end
+
+	local AssignList = {}
+	if PallyPower_NormalAssignments[name] then
+		for class_id, tnames in pairs(PallyPower_NormalAssignments[name]) do
+			for tname, blessing_id in pairs(tnames) do
+				tinsert(AssignList, format("%s %s %s %s", name, class_id, tname, blessing_id))
+			end
+		end
+	end
+	local count = table.getn(AssignList)
+	if count > 0 then
+		local offset = 1
+		repeat
+			self:SendMessage("NASSIGN " .. table.concat(AssignList, "@", offset, min(offset + 4, count)), target and "WHISPER" or nil, target)
+			offset = offset + 5
+		until offset > count
+	end
+end
+
+function PallyPowerBlessings_AddManualPally(editBox)
+	local box = editBox or _G["PallyPowerBlessingsFrameManualPallyName"]
+	if not box then return end
+	local added = PallyPower:AddManualPally(box:GetText())
+	if added then
+		box:SetText("")
+	end
+	box:ClearFocus()
+end
+
+function PallyPowerBlessings_RemoveManualPally(editBox)
+	local box = editBox or _G["PallyPowerBlessingsFrameManualPallyName"]
+	if not box then return end
+	local removed = PallyPower:RemoveManualPally(box:GetText())
+	if removed then
+		box:SetText("")
+	end
+	box:ClearFocus()
 end
 
 function PallyPower:UpdateRoster()
@@ -2193,6 +2523,7 @@ function PallyPower:UpdateRoster()
 			end
 		end
 	end
+	self:RestoreManualPallys()
 	self:UpdateLayout()
 end
 
