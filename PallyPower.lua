@@ -1593,9 +1593,11 @@ end
 
 function PallyPower:GROUP_JOINED(event)
 	--self:Debug("[Event] GROUP_JOINED")
+	local manualAssignmentSnapshots = self:GetManualAssignmentSnapshots()
 	AllPallys = {}
 	SyncList = {}
 	PallyPower_NormalAssignments = {}
+	self:RestoreManualAssignmentSnapshots(manualAssignmentSnapshots)
 	self:ScanSpells()
 	self:ScanCooldowns()
 	self:ScanInventory()
@@ -1614,9 +1616,11 @@ end
 
 function PallyPower:GROUP_LEFT(event)
 	--self:Debug("[Event] GROUP_LEFT")
+	local manualAssignmentSnapshots = self:GetManualAssignmentSnapshots()
 	AllPallys = {}
 	SyncList = {}
 	PallyPower_NormalAssignments = {}
+	self:RestoreManualAssignmentSnapshots(manualAssignmentSnapshots)
 	for pname in pairs(PallyPower_Assignments) do
 		local match = false
 		if pname == self.player then
@@ -1761,7 +1765,7 @@ function PallyPower:ParseMessage(sender, msg)
 		elseif promotedManual then
 			assignmentSnapshot = type(promotedManual) == "table" and promotedManual or self:GetAssignmentSnapshot(sender)
 		end
-		local keepAssignments = assignmentSnapshot and assignmentSnapshot.hasBlessingAssignments and assignmentSnapshot.assignments
+		local keepAssignments = self:ShouldKeepPromotedBlessingAssignments(assignmentSnapshot) and assignmentSnapshot.assignments
 		local keepNormalAssignments = assignmentSnapshot and assignmentSnapshot.normalAssignments
 		local keepAuraAssignment = assignmentSnapshot and assignmentSnapshot.auraAssignment
 		if self:SnapshotHasAssignments(assignmentSnapshot) then
@@ -1823,7 +1827,7 @@ function PallyPower:ParseMessage(sender, msg)
 			return false
 		end
 		local promotedSnapshot = promotedManualPallys[name]
-		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
+		if name == sender and self:ShouldKeepPromotedBlessingAssignments(promotedSnapshot) and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -1841,7 +1845,7 @@ function PallyPower:ParseMessage(sender, msg)
 			return false
 		end
 		local promotedSnapshot = promotedManualPallys[name]
-		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
+		if name == sender and self:ShouldKeepPromotedBlessingAssignments(promotedSnapshot) and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -1889,7 +1893,7 @@ function PallyPower:ParseMessage(sender, msg)
 			return false
 		end
 		local promotedSnapshot = promotedManualPallys[name]
-		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
+		if name == sender and self:ShouldKeepPromotedBlessingAssignments(promotedSnapshot) and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -2212,6 +2216,46 @@ function PallyPower:SnapshotHasAssignments(snapshot)
 	return snapshot and (snapshot.hasBlessingAssignments or snapshot.hasNormalAssignments or snapshot.hasAuraAssignment)
 end
 
+function PallyPower:ShouldKeepPromotedBlessingAssignments(snapshot)
+	return type(snapshot) == "table" and snapshot.assignments and self:SnapshotHasAssignments(snapshot)
+end
+
+function PallyPower:GetManualAssignmentSnapshots()
+	local snapshots = {}
+	if not PallyPower_ManualPallys then return snapshots end
+
+	for name in pairs(PallyPower_ManualPallys) do
+		local snapshot = self:GetAssignmentSnapshot(name)
+		if snapshot then
+			snapshots[name] = snapshot
+		end
+	end
+	return snapshots
+end
+
+function PallyPower:RestoreAssignmentSnapshot(name, snapshot)
+	if not name or type(snapshot) ~= "table" then return end
+
+	if snapshot.assignments then
+		PallyPower_Assignments[name] = tablecopy(snapshot.assignments)
+	end
+	if snapshot.normalAssignments then
+		PallyPower_NormalAssignments[name] = tablecopy(snapshot.normalAssignments)
+	end
+	if snapshot.auraAssignment ~= nil then
+		PallyPower_AuraAssignments[name] = snapshot.auraAssignment
+	end
+end
+
+function PallyPower:RestoreManualAssignmentSnapshots(snapshots)
+	if type(snapshots) ~= "table" then return end
+
+	for name, snapshot in pairs(snapshots) do
+		local manualName = self:GetManualPallyKey(name) or name
+		self:RestoreAssignmentSnapshot(manualName, snapshot)
+	end
+end
+
 function PallyPower:CanRemoveManualPally(name)
 	local manualName = self:GetManualPallyKey(name)
 	if not manualName then return nil end
@@ -2280,7 +2324,7 @@ function PallyPower:PromoteManualPally(manualName, groupName)
 
 	if manualName ~= groupName then
 		if PallyPower_Assignments[manualName] then
-			if self:HasBlessingAssignments(manualName) or not self:HasBlessingAssignments(groupName) then
+			if self:SnapshotHasAssignments(manualSnapshot) or not self:HasBlessingAssignments(groupName) then
 				PallyPower_Assignments[groupName] = PallyPower_Assignments[manualName]
 			end
 		end
@@ -2342,7 +2386,7 @@ function PallyPower:RestoreManualPallys()
 	for _, name in ipairs(manualNames) do
 		local groupName = self:GetGroupUnitName(name)
 		if groupName then
-			local hadAssignments = self:HasBlessingAssignments(name)
+			local hadAssignments = self:SnapshotHasAssignments(self:GetAssignmentSnapshot(name))
 			local promotedName = self:PromoteManualPally(name, groupName)
 			if hadAssignments and promotedName and self:CheckLeader(self.player) then
 				C_Timer.After(
