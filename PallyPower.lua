@@ -626,6 +626,7 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 			local SkillInfo = AllPallys[name]
 			local BuffInfo = PallyPower_Assignments[name]
 			local NormalBuffInfo = PallyPower_NormalAssignments[name]
+			local removableManualName = PallyPower:CanRemoveManualPally(name)
 			_G[fname .. "Name"]:SetText(name)
 			if PallyPower:CanControl(name) then
 				_G[fname .. "Name"]:SetTextColor(1, 1, 1)
@@ -654,6 +655,20 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 				else
 					_G[fname .. "Icon" .. id]:Hide()
 					_G[fname .. "Skill" .. id]:Hide()
+				end
+			end
+			local manualRemoveButton = _G[fname .. "ManualPallyRemove"]
+			if manualRemoveButton then
+				if removableManualName then
+					manualRemoveButton.manualPallyName = removableManualName
+					manualRemoveButton:Show()
+					for id = 1, PallyPower.isWrath and 4 or 6 do
+						_G[fname .. "Icon" .. id]:Hide()
+						_G[fname .. "Skill" .. id]:Hide()
+					end
+				else
+					manualRemoveButton.manualPallyName = nil
+					manualRemoveButton:Hide()
 				end
 			end
 			if not AllPallys[name].AuraInfo then
@@ -717,7 +732,7 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 			i = i + 1
 			numPallys = numPallys + 1
 		end
-		PallyPowerBlessingsFrame:SetHeight(14 + 24 + 56 + (numPallys * 100) + 22 + 13 * numMaxClass)
+		PallyPowerBlessingsFrame:SetHeight(14 + 24 + 56 + (numPallys * 100) + 46 + 13 * numMaxClass)
 		_G["PallyPowerBlessingsFramePlayer1"]:SetPoint("TOPLEFT", 8, -80 - 13 * numMaxClass)
 		for i = 1, PALLYPOWER_MAXCLASSES do
 			_G["PallyPowerBlessingsFrameClassGroup" .. i .. "Line"]:SetHeight(56 + 13 * numMaxClass)
@@ -1738,16 +1753,27 @@ function PallyPower:ParseMessage(sender, msg)
 	if strfind(msg, "^SELF") then
 		local manualName = self:GetManualPallyKey(sender)
 		local promotedManual = promotedManualPallys[sender] or (AllPallys[sender] and AllPallys[sender].manual)
-		local keepName = manualName or (promotedManual and sender)
-		local keepAssignments = keepName and self:HasBlessingAssignments(keepName) and PallyPower_Assignments[keepName]
-		local keepNormalAssignments = keepName and PallyPower_NormalAssignments[keepName]
+		local assignmentSnapshot
 		if manualName then
+			assignmentSnapshot = self:GetAssignmentSnapshot(manualName)
 			sender = self:PromoteManualPally(manualName, sender)
+			assignmentSnapshot = promotedManualPallys[sender] or assignmentSnapshot
 		elseif promotedManual then
+			assignmentSnapshot = type(promotedManual) == "table" and promotedManual or self:GetAssignmentSnapshot(sender)
+		end
+		local keepAssignments = assignmentSnapshot and assignmentSnapshot.hasBlessingAssignments and assignmentSnapshot.assignments
+		local keepNormalAssignments = assignmentSnapshot and assignmentSnapshot.normalAssignments
+		local keepAuraAssignment = assignmentSnapshot and assignmentSnapshot.auraAssignment
+		if self:SnapshotHasAssignments(assignmentSnapshot) then
+			promotedManualPallys[sender] = assignmentSnapshot
+		else
 			promotedManualPallys[sender] = nil
 		end
-		PallyPower_NormalAssignments[sender] = keepNormalAssignments or {}
-		PallyPower_Assignments[sender] = keepAssignments or {}
+		PallyPower_NormalAssignments[sender] = keepNormalAssignments and tablecopy(keepNormalAssignments) or {}
+		PallyPower_Assignments[sender] = keepAssignments and tablecopy(keepAssignments) or {}
+		if keepAuraAssignment ~= nil then
+			PallyPower_AuraAssignments[sender] = keepAuraAssignment
+		end
 		AllPallys[sender] = {}
 		self:SyncAdd(sender)
 		local _, _, numbers, assign = strfind(msg, "SELF ([0-9a-fn]*)@([0-9n]*)")
@@ -1769,11 +1795,22 @@ function PallyPower:ParseMessage(sender, msg)
 				PallyPower_Assignments[sender][i] = tmp + 0
 			end
 		end
-		if keepAssignments and self:CheckLeader(self.player) then
+		if self:SnapshotHasAssignments(assignmentSnapshot) then
+			local promotedName = sender
+			if self:CheckLeader(self.player) then
+				C_Timer.After(
+					0.5,
+					function()
+						self:SendPallyAssignments(promotedName)
+					end
+				)
+			end
 			C_Timer.After(
-				0.5,
+				10.0,
 				function()
-					self:SendPallyAssignments(sender)
+					if promotedManualPallys[promotedName] == assignmentSnapshot then
+						promotedManualPallys[promotedName] = nil
+					end
 				end
 			)
 		end
@@ -1783,6 +1820,10 @@ function PallyPower:ParseMessage(sender, msg)
 		local _, _, name, class, skill = strfind(msg, "^ASSIGN (.*) (.*) (.*)")
 		name = self:RemoveRealmName(name)
 		if name ~= sender and not (leader or self.opt.freeassign) then
+			return false
+		end
+		local promotedSnapshot = promotedManualPallys[name]
+		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -1797,6 +1838,10 @@ function PallyPower:ParseMessage(sender, msg)
 		local _, _, name, assign = strfind(msg, "^PASSIGN (.*)@([0-9n]*)")
 		name = self:RemoveRealmName(name)
 		if name ~= sender and not (leader or self.opt.freeassign) then
+			return false
+		end
+		local promotedSnapshot = promotedManualPallys[name]
+		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -1819,18 +1864,21 @@ function PallyPower:ParseMessage(sender, msg)
 			if name ~= sender and not (leader or self.opt.freeassign) then
 				return
 			end
-			if not PallyPower_NormalAssignments[name] then
-				PallyPower_NormalAssignments[name] = {}
+			local promotedSnapshot = promotedManualPallys[name]
+			if not (name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasNormalAssignments and self:CanControl(name)) then
+				if not PallyPower_NormalAssignments[name] then
+					PallyPower_NormalAssignments[name] = {}
+				end
+				class = class + 0
+				if not PallyPower_NormalAssignments[name][class] then
+					PallyPower_NormalAssignments[name][class] = {}
+				end
+				skill = skill + 0
+				if skill == 0 then
+					skill = nil
+				end
+				PallyPower_NormalAssignments[name][class][tname] = skill
 			end
-			class = class + 0
-			if not PallyPower_NormalAssignments[name][class] then
-				PallyPower_NormalAssignments[name][class] = {}
-			end
-			skill = skill + 0
-			if skill == 0 then
-				skill = nil
-			end
-			PallyPower_NormalAssignments[name][class][tname] = skill
 		end
 	end
 
@@ -1838,6 +1886,10 @@ function PallyPower:ParseMessage(sender, msg)
 		local _, _, name, skill = strfind(msg, "^MASSIGN (.*) (.*)")
 		name = self:RemoveRealmName(name)
 		if name ~= sender and not (leader or self.opt.freeassign) then
+			return false
+		end
+		local promotedSnapshot = promotedManualPallys[name]
+		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasBlessingAssignments and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_Assignments[name] then
@@ -1900,7 +1952,11 @@ function PallyPower:ParseMessage(sender, msg)
 	end
 
 	if strfind(msg, "^ASELF") then
-		PallyPower_AuraAssignments[sender] = 0
+		local promotedSnapshot = promotedManualPallys[sender]
+		local keepPromotedAura = type(promotedSnapshot) == "table" and promotedSnapshot.hasAuraAssignment and self:CanControl(sender)
+		if not keepPromotedAura then
+			PallyPower_AuraAssignments[sender] = 0
+		end
 		if AllPallys[sender] then
 			if not AllPallys[sender].AuraInfo then
 				AllPallys[sender].AuraInfo = {}
@@ -1919,7 +1975,9 @@ function PallyPower:ParseMessage(sender, msg)
 				if assign == "n" or assign == "" then
 					assign = 0
 				end
-				PallyPower_AuraAssignments[sender] = assign + 0
+				if not keepPromotedAura then
+					PallyPower_AuraAssignments[sender] = assign + 0
+				end
 			end
 		end
 	end
@@ -1928,6 +1986,10 @@ function PallyPower:ParseMessage(sender, msg)
 		local _, _, name, aura = strfind(msg, "^AASSIGN (.*) (.*)")
 		name = self:RemoveRealmName(name)
 		if name ~= sender and not (leader or self.opt.freeassign) then
+			return false
+		end
+		local promotedSnapshot = promotedManualPallys[name]
+		if name == sender and type(promotedSnapshot) == "table" and promotedSnapshot.hasAuraAssignment and self:CanControl(name) then
 			return false
 		end
 		if not PallyPower_AuraAssignments[name] then
@@ -2108,6 +2170,55 @@ function PallyPower:HasBlessingAssignments(name)
 	return false
 end
 
+function PallyPower:HasNormalAssignments(name)
+	local assignments = PallyPower_NormalAssignments[name]
+	if not assignments then return false end
+
+	for _, targets in pairs(assignments) do
+		if type(targets) == "table" then
+			for _, blessing in pairs(targets) do
+				if blessing and blessing ~= 0 then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+function PallyPower:GetAssignmentSnapshot(name)
+	if not name then return nil end
+
+	local snapshot = {}
+	if PallyPower_Assignments[name] then
+		snapshot.assignments = tablecopy(PallyPower_Assignments[name])
+		snapshot.hasBlessingAssignments = self:HasBlessingAssignments(name)
+	end
+	if PallyPower_NormalAssignments[name] then
+		snapshot.normalAssignments = tablecopy(PallyPower_NormalAssignments[name])
+		snapshot.hasNormalAssignments = self:HasNormalAssignments(name)
+	end
+	if PallyPower_AuraAssignments[name] ~= nil then
+		snapshot.auraAssignment = PallyPower_AuraAssignments[name]
+		snapshot.hasAuraAssignment = type(PallyPower_AuraAssignments[name]) == "number" and PallyPower_AuraAssignments[name] ~= 0
+	end
+
+	if snapshot.assignments or snapshot.normalAssignments or snapshot.auraAssignment ~= nil then
+		return snapshot
+	end
+end
+
+function PallyPower:SnapshotHasAssignments(snapshot)
+	return snapshot and (snapshot.hasBlessingAssignments or snapshot.hasNormalAssignments or snapshot.hasAuraAssignment)
+end
+
+function PallyPower:CanRemoveManualPally(name)
+	local manualName = self:GetManualPallyKey(name)
+	if not manualName then return nil end
+	if self:GetGroupUnitName(manualName) then return nil end
+	return manualName
+end
+
 function PallyPower:EnsureManualAssignments(name)
 	if not PallyPower_Assignments[name] then
 		PallyPower_Assignments[name] = {}
@@ -2162,13 +2273,16 @@ function PallyPower:PromoteManualPally(manualName, groupName)
 	if not manualName or not groupName then return nil end
 
 	local wasManual = (PallyPower_ManualPallys and PallyPower_ManualPallys[manualName]) or (AllPallys[manualName] and AllPallys[manualName].manual)
+	local manualSnapshot = self:GetAssignmentSnapshot(manualName)
 	if PallyPower_ManualPallys then
 		PallyPower_ManualPallys[manualName] = nil
 	end
 
 	if manualName ~= groupName then
-		if PallyPower_Assignments[manualName] and not self:HasBlessingAssignments(groupName) then
-			PallyPower_Assignments[groupName] = PallyPower_Assignments[manualName]
+		if PallyPower_Assignments[manualName] then
+			if self:HasBlessingAssignments(manualName) or not self:HasBlessingAssignments(groupName) then
+				PallyPower_Assignments[groupName] = PallyPower_Assignments[manualName]
+			end
 		end
 		PallyPower_Assignments[manualName] = nil
 
@@ -2189,8 +2303,10 @@ function PallyPower:PromoteManualPally(manualName, groupName)
 		end
 		PallyPower_NormalAssignments[manualName] = nil
 
-		if PallyPower_AuraAssignments[manualName] and (not PallyPower_AuraAssignments[groupName] or PallyPower_AuraAssignments[groupName] == 0) then
-			PallyPower_AuraAssignments[groupName] = PallyPower_AuraAssignments[manualName]
+		if PallyPower_AuraAssignments[manualName] ~= nil then
+			if PallyPower_AuraAssignments[manualName] ~= 0 or not PallyPower_AuraAssignments[groupName] or PallyPower_AuraAssignments[groupName] == 0 then
+				PallyPower_AuraAssignments[groupName] = PallyPower_AuraAssignments[manualName]
+			end
 		end
 		PallyPower_AuraAssignments[manualName] = nil
 
@@ -2207,7 +2323,7 @@ function PallyPower:PromoteManualPally(manualName, groupName)
 	self:EnsureManualAssignments(groupName)
 	self:SyncAdd(groupName)
 	if wasManual then
-		promotedManualPallys[groupName] = true
+		promotedManualPallys[groupName] = self:GetAssignmentSnapshot(groupName) or manualSnapshot or true
 	end
 	return groupName
 end
@@ -2335,14 +2451,23 @@ function PallyPowerBlessings_AddManualPally(editBox)
 	box:ClearFocus()
 end
 
-function PallyPowerBlessings_RemoveManualPally(editBox)
-	local box = editBox or _G["PallyPowerBlessingsFrameManualPallyName"]
-	if not box then return end
-	local removed = PallyPower:RemoveManualPally(box:GetText())
-	if removed then
-		box:SetText("")
+function PallyPowerBlessings_RemoveManualPally(target)
+	local name
+	local box
+	if type(target) == "string" then
+		name = target
+	else
+		box = target or _G["PallyPowerBlessingsFrameManualPallyName"]
+		if not box then return end
+		name = box:GetText()
 	end
-	box:ClearFocus()
+	local removed = PallyPower:RemoveManualPally(name)
+	if box then
+		if removed then
+			box:SetText("")
+		end
+		box:ClearFocus()
+	end
 end
 
 function PallyPower:UpdateRoster()

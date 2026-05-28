@@ -1381,6 +1381,34 @@
 			</Layer>
 		</Layers>
 		<Frames>
+			<Button name = "$parentManualPallyRemove" inherits = "GameMenuButtonTemplate" text = "PALLYPOWER_MANUALPALLY_REMOVE" hidden = "true">
+				<Size>
+					<AbsDimension x = "75" y = "18"/>
+				</Size>
+				<Anchors>
+					<Anchor point = "TOPLEFT" relativeTo = "$parentName" relativePoint = "BOTTOMLEFT">
+						<Offset>
+							<AbsDimension x = "0" y = "-2"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						PallyPowerBlessings_RemoveManualPally(self.manualPallyName);
+					</OnClick>
+					<OnEnter>
+						if PallyPower.opt.ShowTooltips then
+							GameTooltip:SetOwner(self, "ANCHOR_BOTTOM");
+							GameTooltip:SetText(PALLYPOWER_MANUALPALLY_REMOVE_DESC);
+							GameTooltip:Show(self, motion);
+							CursorUpdate(self, motion);
+						end
+					</OnEnter>
+					<OnLeave>
+						GameTooltip:Hide(self, motion);
+					</OnLeave>
+				</Scripts>
+			</Button>
 			<Button name = "$parentAura1" inherits = "AuraGridButtonTemplate">
 				<Anchors>
 					<Anchor point = "TOPLEFT">
@@ -1935,7 +1963,7 @@
 				<Anchors>
 					<Anchor point = "BOTTOMLEFT">
 						<Offset>
-							<AbsDimension x = "156" y = "7"/>
+							<AbsDimension x = "156" y = "0"/>
 						</Offset>
 					</Anchor>
 				</Anchors>
@@ -1987,7 +2015,7 @@
 					</OnLeave>
 				</Scripts>
 			</Button>
-			<Button name = "$parentManualPallyRemove" inherits = "GameMenuButtonTemplate" text = "PALLYPOWER_MANUALPALLY_REMOVE" hidden = "false">
+			<Button name = "$parentManualPallyRemove" inherits = "GameMenuButtonTemplate" text = "PALLYPOWER_MANUALPALLY_REMOVE" hidden = "true">
 				<Size>
 					<AbsDimension x = "75" y = "20"/>
 				</Size>
@@ -2061,7 +2089,7 @@
 					<Anchors>
 						<Anchor point = "BOTTOMLEFT" relativeTo = "PallyPowerBlessingsFrame" relativePoint = "BOTTOMLEFT">
 							<Offset>
-								<AbsDimension x = "156" y = "28"/>
+								<AbsDimension x = "156" y = "21"/>
 							</Offset>
 						</Anchor>
 					</Anchors>
