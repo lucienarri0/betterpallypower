@@ -76,6 +76,15 @@ L["FREE_ASSIGN_TOOLTIP"] = [=[Allow others to change your
 blessings without being Party
 Leader / Raid Assistant.]=]
 L["Fully Buffed"] = "Fully Buffed"
+L["Add"] = "Add"
+L["Manual Paladin"] = "Manual Paladin"
+L["Remove"] = "Remove"
+L["Type the name of a Paladin who is not in the group yet."] = "Type the name of a Paladin who is not in the group yet."
+L["Add this name as a temporary Paladin for blessing assignments."] = "Add this name as a temporary Paladin for blessing assignments."
+L["Remove this temporary Paladin only if the player is not in the group."] = "Remove this temporary Paladin only if the player is not in the group."
+L["%s is already in your group."] = "%s is already in your group."
+L["%s is already in your group and cannot be removed manually."] = "%s is already in your group and cannot be removed manually."
+L["%s is not a manual Paladin."] = "%s is not a manual Paladin."
 L["Hide Bench (by Subgroup)"] = "Hide Bench (by Subgroup)"
 L["Horizontal Left | Down"] = "Horizontal Left | Down"
 L["Horizontal Left | Up"] = "Horizontal Left | Up"
