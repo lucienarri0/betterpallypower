@@ -18,6 +18,7 @@ local twipe = table.wipe
 local tsort = table.sort
 local strfind = string.find
 local strlower = string.lower
+local strupper = string.upper
 local strsub = string.sub
 local format = string.format
 
@@ -30,6 +31,7 @@ PallyPower_Assignments = {}
 PallyPower_NormalAssignments = {}
 PallyPower_AuraAssignments = {}
 PallyPower_ManualPallys = PallyPower_ManualPallys or {}
+PallyPower_ManualMembers = PallyPower_ManualMembers or {}
 
 AllPallys = {}
 SyncList = {}
@@ -51,6 +53,9 @@ local raidmaintanks = {}
 local classmaintanks = {}
 local raidmainassists = {}
 local promotedManualPallys = {}
+local MANUAL_MEMBER_UNITID = "manualmember"
+local MANUAL_MEMBER_GUILD_PAGE_SIZE = 10
+local MANUAL_MEMBER_GUILD_SCROLLBAR_WIDTH = 18
 
 local lastMsg = ""
 local prevBuffDuration
@@ -125,6 +130,7 @@ function PallyPower:OnInitialize()
 	self.AutoBuffedList = {}
 	self.PreviousAutoBuffedUnit = nil
 	self.menuFrame = LUIDDM:Create_UIDropDownMenu("PallyPowerMenuFrame", UIParent)
+	self.manualMemberMenuFrame = LUIDDM:Create_UIDropDownMenu("PallyPowerManualMemberMenuFrame", UIParent)
 
 	if not PallyPowerConfigFrame then
 		local ConfigFrame = AceGUI:Create("Frame")
@@ -187,6 +193,9 @@ function PallyPower:OnInitialize()
 	end
 	if not PallyPower_ManualPallys then
 		PallyPower_ManualPallys = {}
+	end
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
 	end
 	local h = _G["PallyPowerFrame"]
 	h:ClearAllPoints()
@@ -583,6 +592,46 @@ function PallyPowerBlessingsFrame_MouseDown(self, button)
 	end
 end
 
+function PallyPower:EnsureManualMemberRemoveButton(playerButton)
+	if not playerButton then return nil end
+
+	local buttonName = playerButton:GetName() .. "ManualMemberRemove"
+	local removeButton = _G[buttonName]
+	if removeButton then return removeButton end
+
+	removeButton = CreateFrame("Button", buttonName, playerButton)
+	removeButton:SetSize(10, 10)
+	removeButton:SetPoint("RIGHT", playerButton, "RIGHT", -2, 0)
+	removeButton:Hide()
+
+	local text = removeButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	text:SetAllPoints(removeButton)
+	text:SetJustifyH("CENTER")
+	text:SetJustifyV("MIDDLE")
+	text:SetText("x")
+	text:SetTextColor(1, 0.25, 0.25)
+	removeButton.Text = text
+
+	removeButton:SetScript("OnClick", function(self)
+		if self.manualMemberName then
+			PallyPower:RemoveManualMember(self.manualMemberName)
+		end
+	end)
+	removeButton:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_REMOVE_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	removeButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	return removeButton
+end
+
 function PallyPowerBlessingsGrid_Update(self, elapsed)
 	if not initialized then
 		return
@@ -597,12 +646,36 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 				local pbnt = fname .. "PlayerButton" .. j
 				if classes[i] and classes[i][j] then
 					local unit = classes[i][j]
+					local playerButton = _G[pbnt]
+					local playerText = _G[pbnt .. "Text"]
+					local removeButton = PallyPower:EnsureManualMemberRemoveButton(playerButton)
 					if unit.name then
 						local shortname = Ambiguate(unit.name, "short")
-						if unit.unitid:find("pet") then
-							_G[pbnt .. "Text"]:SetText("|T132242:0|t "..shortname)
+						if unit.manualMember then
+							playerText:SetWidth(56)
+							playerText:SetText("|cff00ccff+|r " .. shortname)
+							local removableName = PallyPower:CanRemoveManualMember(unit.name)
+							if removableName and removeButton then
+								removeButton.manualMemberName = removableName
+								removeButton:Show()
+							elseif removeButton then
+								removeButton.manualMemberName = nil
+								removeButton:Hide()
+							end
+						elseif unit.unitid:find("pet") then
+							playerText:SetWidth(80)
+							playerText:SetText("|T132242:0|t "..shortname)
+							if removeButton then
+								removeButton.manualMemberName = nil
+								removeButton:Hide()
+							end
 						else
-							_G[pbnt .. "Text"]:SetText(shortname)
+							playerText:SetWidth(80)
+							playerText:SetText(shortname)
+							if removeButton then
+								removeButton.manualMemberName = nil
+								removeButton:Hide()
+							end
 						end
 					end
 					local normal, greater = PallyPower:GetSpellID(i, unit.name)
@@ -613,6 +686,11 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 					end
 					_G[pbnt]:Show()
 				else
+					local removeButton = PallyPower:EnsureManualMemberRemoveButton(_G[pbnt])
+					if removeButton then
+						removeButton.manualMemberName = nil
+						removeButton:Hide()
+					end
 					_G[pbnt]:Hide()
 				end
 			end
@@ -669,6 +747,12 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 				else
 					manualRemoveButton.manualPallyName = nil
 					manualRemoveButton:Hide()
+				end
+			end
+			if SkillInfo.manual then
+				for id = 1, PallyPower.isWrath and 4 or 6 do
+					_G[fname .. "Icon" .. id]:Hide()
+					_G[fname .. "Skill" .. id]:Hide()
 				end
 			end
 			if not AllPallys[name].AuraInfo then
@@ -732,7 +816,7 @@ function PallyPowerBlessingsGrid_Update(self, elapsed)
 			i = i + 1
 			numPallys = numPallys + 1
 		end
-		PallyPowerBlessingsFrame:SetHeight(14 + 24 + 56 + (numPallys * 100) + 46 + 13 * numMaxClass)
+		PallyPowerBlessingsFrame:SetHeight(14 + 24 + 56 + (numPallys * 100) + 72 + 13 * numMaxClass)
 		_G["PallyPowerBlessingsFramePlayer1"]:SetPoint("TOPLEFT", 8, -80 - 13 * numMaxClass)
 		for i = 1, PALLYPOWER_MAXCLASSES do
 			_G["PallyPowerBlessingsFrameClassGroup" .. i .. "Line"]:SetHeight(56 + 13 * numMaxClass)
@@ -1177,6 +1261,14 @@ function PallyPower:CanBuff(name, test)
 end
 
 function PallyPower:CanBuffBlessing(spellId, gspellId, unitId, config)
+	if not unitId or not UnitExists(unitId) then
+		if config then
+			local normSpell = spellId and spellId > 0 and self.Spells[spellId] or nil
+			local greatSpell = gspellId and gspellId > 0 and self.GSpells[gspellId] or nil
+			return normSpell, greatSpell
+		end
+		return nil, nil
+	end
 	if unitId and spellId or gspellId then
 		local normSpell, greatSpell
 		if UnitLevel(unitId) >= 60 then
@@ -1594,13 +1686,16 @@ end
 function PallyPower:GROUP_JOINED(event)
 	--self:Debug("[Event] GROUP_JOINED")
 	local manualAssignmentSnapshots = self:GetManualAssignmentSnapshots()
+	local manualMemberAssignmentSnapshots = self:GetManualMemberAssignmentSnapshots()
 	AllPallys = {}
 	SyncList = {}
 	PallyPower_NormalAssignments = {}
 	self:RestoreManualAssignmentSnapshots(manualAssignmentSnapshots)
+	self:RestoreManualMemberAssignmentSnapshots(manualMemberAssignmentSnapshots)
 	self:ScanSpells()
 	self:ScanCooldowns()
 	self:ScanInventory()
+	self:RestoreManualMembers()
 	self:RestoreManualPallys()
 	C_Timer.After(
 		2.0,
@@ -1617,10 +1712,12 @@ end
 function PallyPower:GROUP_LEFT(event)
 	--self:Debug("[Event] GROUP_LEFT")
 	local manualAssignmentSnapshots = self:GetManualAssignmentSnapshots()
+	local manualMemberAssignmentSnapshots = self:GetManualMemberAssignmentSnapshots()
 	AllPallys = {}
 	SyncList = {}
 	PallyPower_NormalAssignments = {}
 	self:RestoreManualAssignmentSnapshots(manualAssignmentSnapshots)
+	self:RestoreManualMemberAssignmentSnapshots(manualMemberAssignmentSnapshots)
 	for pname in pairs(PallyPower_Assignments) do
 		local match = false
 		if pname == self.player then
@@ -1643,6 +1740,7 @@ function PallyPower:GROUP_LEFT(event)
 	self:ScanSpells()
 	self:ScanCooldowns()
 	self:ScanInventory()
+	self:RestoreManualMembers()
 	self:RestoreManualPallys()
 	self:UpdateLayout()
 	self:UpdateRoster()
@@ -1684,6 +1782,7 @@ function PallyPower:UpdateAllPallys()
 				self:ScanSpells()
 				self:ScanCooldowns()
 				self:ScanInventory()
+				self:RestoreManualMembers()
 				self:RestoreManualPallys()
 				self:SendSelf()
 				self:SendMessage("REQ")
@@ -2092,6 +2191,9 @@ function PallyPower:SyncAdd(name)
 end
 
 function PallyPower:FormatTime(time)
+	if type(time) ~= "number" then
+		return ""
+	end
 	if not time or time < 0 or time == 9999 then
 		return ""
 	end
@@ -2146,7 +2248,7 @@ function PallyPower:GetManualPallyKey(name)
 	end
 end
 
-function PallyPower:GetGroupUnitName(name)
+function PallyPower:GetGroupUnitInfo(name)
 	name = self:NormalizeManualPallyName(name)
 	if not name then return nil end
 
@@ -2156,10 +2258,159 @@ function PallyPower:GetGroupUnitName(name)
 		if unitid and (not unitid:find("pet")) and UnitExists(unitid) then
 			local unitName = self:RemoveRealmName(GetUnitName(unitid, true))
 			if unitName and strlower(unitName) == lowerName then
-				return unitName
+				return unitName, UnitClassBase(unitid), unitid
 			end
 		end
 	end
+end
+
+function PallyPower:GetGroupUnitName(name)
+	local unitName = self:GetGroupUnitInfo(name)
+	return unitName
+end
+
+function PallyPower:GetClassDisplayName(classID)
+	local className = self.ClassID[classID]
+	if not className then return "" end
+
+	if LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[className] then
+		return LOCALIZED_CLASS_NAMES_MALE[className]
+	end
+	return className
+end
+
+function PallyPower:GetClassColorCode(className)
+	className = self:NormalizeManualMemberClass(className)
+	if not className then return "ffffffff" end
+
+	local colors = CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS
+	local color = colors and colors[className]
+	if color and color.colorStr then
+		return color.colorStr
+	end
+
+	local fallback = {
+		WARRIOR = "ffc79c6e",
+		ROGUE = "fffff569",
+		PRIEST = "ffffffff",
+		DRUID = "ffff7d0a",
+		PALADIN = "fff58cba",
+		HUNTER = "ffabd473",
+		MAGE = "ff69ccf0",
+		WARLOCK = "ff9482c9",
+		SHAMAN = "ff0070de",
+		DEATHKNIGHT = "ffc41f3b"
+	}
+	return fallback[className] or "ffffffff"
+end
+
+function PallyPower:GetClassColoredDisplayName(classID)
+	local className = type(classID) == "number" and self.ClassID[classID] or self:NormalizeManualMemberClass(classID)
+	if not className then return "" end
+
+	local id = self:GetClassID(className)
+	local displayName = id > 0 and self:GetClassDisplayName(id) or className
+	return "|c" .. self:GetClassColorCode(className) .. displayName .. "|r"
+end
+
+function PallyPower:GetClassColoredText(text, className)
+	className = self:NormalizeManualMemberClass(className)
+	if not text or not className then return text or "" end
+	return "|c" .. self:GetClassColorCode(className) .. text .. "|r"
+end
+
+function PallyPower:GetDefaultManualMemberClassID()
+	local paladinClassID = self:GetClassID("PALADIN")
+	if paladinClassID and paladinClassID > 0 then
+		return paladinClassID
+	end
+	return 1
+end
+
+function PallyPower:GetManualMemberClassID()
+	if not self.manualMemberClassID or not self.ClassID[self.manualMemberClassID] or self.ClassID[self.manualMemberClassID] == "PET" then
+		self.manualMemberClassID = self:GetDefaultManualMemberClassID()
+	end
+	return self.manualMemberClassID
+end
+
+function PallyPower:NormalizeManualMemberClass(class)
+	if type(class) == "number" then
+		local className = self.ClassID[class]
+		if className and className ~= "PET" then
+			return className
+		end
+		return nil
+	end
+	if type(class) ~= "string" then return nil end
+
+	class = class:gsub("^%s+", ""):gsub("%s+$", "")
+	if class == "" then return nil end
+
+	local upperClass = strupper(class)
+	if self.ClassToID[upperClass] and upperClass ~= "PET" then
+		return upperClass
+	end
+
+	local lowerClass = strlower(class)
+	for id, className in pairs(self.ClassID) do
+		if className ~= "PET" then
+			local localizedName = self:GetClassDisplayName(id)
+			if strlower(className) == lowerClass or strlower(localizedName) == lowerClass then
+				return className
+			end
+		end
+	end
+end
+
+function PallyPower:GetManualMemberKey(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name or not PallyPower_ManualMembers then return nil end
+
+	local lowerName = strlower(name)
+	for manualName in pairs(PallyPower_ManualMembers) do
+		if strlower(manualName) == lowerName then
+			return manualName
+		end
+	end
+end
+
+function PallyPower:GetExpansionMaxLevel()
+	if self.isWrath then
+		return 80
+	elseif self.isBCC then
+		return 70
+	end
+	return 60
+end
+
+function PallyPower:GetMaxLevelGuildMembers()
+	local members = {}
+	if not IsInGuild or not IsInGuild() then
+		return members
+	end
+
+	if GuildRoster then
+		GuildRoster()
+	end
+	if not GetNumGuildMembers or not GetGuildRosterInfo then
+		return members
+	end
+	local maxLevel = self:GetExpansionMaxLevel()
+	for i = 1, GetNumGuildMembers() do
+		local name, _, _, level, localizedClass, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
+		local className = self:NormalizeManualMemberClass(classFileName) or self:NormalizeManualMemberClass(localizedClass)
+		if name and level == maxLevel and className then
+			tinsert(members, {name = self:RemoveRealmName(name), className = className})
+		end
+	end
+	tsort(
+		members,
+		function(a, b)
+			return strlower(a.name) < strlower(b.name)
+		end
+	)
+	return members
 end
 
 function PallyPower:HasBlessingAssignments(name)
@@ -2256,8 +2507,187 @@ function PallyPower:RestoreManualAssignmentSnapshots(snapshots)
 	end
 end
 
+function PallyPower:GetManualMemberAssignmentSnapshots()
+	local snapshots = {}
+	if not PallyPower_ManualMembers then return snapshots end
+
+	for manualName in pairs(PallyPower_ManualMembers) do
+		local lowerName = strlower(manualName)
+		for pally, classAssignments in pairs(PallyPower_NormalAssignments) do
+			if type(classAssignments) == "table" then
+				for classID, targets in pairs(classAssignments) do
+					if type(targets) == "table" then
+						for targetName, blessing in pairs(targets) do
+							if type(targetName) == "string" and strlower(targetName) == lowerName and blessing and blessing ~= 0 then
+								if not snapshots[manualName] then
+									snapshots[manualName] = {}
+								end
+								tinsert(snapshots[manualName], {pally = pally, class = classID, blessing = blessing})
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	return snapshots
+end
+
+function PallyPower:RestoreManualMemberAssignmentSnapshots(snapshots)
+	if type(snapshots) ~= "table" then return end
+
+	for name, assignments in pairs(snapshots) do
+		local manualName = self:GetManualMemberKey(name) or self:NormalizeManualPallyName(name)
+		if manualName and type(assignments) == "table" then
+			local className = PallyPower_ManualMembers and PallyPower_ManualMembers[manualName]
+			local classID = self:GetClassID(className or "")
+			for _, assignment in ipairs(assignments) do
+				local targetClassID = classID > 0 and classID or assignment.class
+				if assignment.pally and targetClassID and assignment.blessing and assignment.blessing ~= 0 then
+					if not PallyPower_NormalAssignments[assignment.pally] then
+						PallyPower_NormalAssignments[assignment.pally] = {}
+					end
+					if not PallyPower_NormalAssignments[assignment.pally][targetClassID] then
+						PallyPower_NormalAssignments[assignment.pally][targetClassID] = {}
+					end
+					PallyPower_NormalAssignments[assignment.pally][targetClassID][manualName] = assignment.blessing
+				end
+			end
+		end
+	end
+end
+
+function PallyPower:RenameManualMemberAssignments(oldName, newName, oldClassID, newClassID, sendUpdates)
+	oldName = self:NormalizeManualPallyName(oldName)
+	newName = self:NormalizeManualPallyName(newName)
+	if not oldName or not newName then return end
+
+	local lowerOldName = strlower(oldName)
+	local moves = {}
+	for pally, classAssignments in pairs(PallyPower_NormalAssignments) do
+		if type(classAssignments) == "table" then
+			for classID, targets in pairs(classAssignments) do
+				if type(targets) == "table" then
+					for targetName, blessing in pairs(targets) do
+						if type(targetName) == "string" and strlower(targetName) == lowerOldName then
+							local targetClassID = newClassID and newClassID > 0 and newClassID or classID
+							tinsert(moves, {pally = pally, classID = classID, targetName = targetName, blessing = blessing, targetClassID = targetClassID})
+						end
+					end
+				end
+			end
+		end
+	end
+	for _, move in ipairs(moves) do
+		if PallyPower_NormalAssignments[move.pally] and PallyPower_NormalAssignments[move.pally][move.classID] then
+			PallyPower_NormalAssignments[move.pally][move.classID][move.targetName] = nil
+		end
+		if move.blessing and move.blessing ~= 0 then
+			if not PallyPower_NormalAssignments[move.pally] then
+				PallyPower_NormalAssignments[move.pally] = {}
+			end
+			if not PallyPower_NormalAssignments[move.pally][move.targetClassID] then
+				PallyPower_NormalAssignments[move.pally][move.targetClassID] = {}
+			end
+			if PallyPower_NormalAssignments[move.pally][move.targetClassID][newName] == nil then
+				PallyPower_NormalAssignments[move.pally][move.targetClassID][newName] = move.blessing
+			end
+		end
+		if sendUpdates then
+			self:SendNormalBlessings(move.pally, move.classID, move.targetName)
+			if move.blessing and move.blessing ~= 0 then
+				self:SendNormalBlessings(move.pally, move.targetClassID, newName)
+			end
+		end
+	end
+end
+
+function PallyPower:ClearManualMemberAssignments(name, sendUpdates)
+	name = self:NormalizeManualPallyName(name)
+	if not name then return end
+
+	local lowerName = strlower(name)
+	for pally, classAssignments in pairs(PallyPower_NormalAssignments) do
+		if type(classAssignments) == "table" then
+			for classID, targets in pairs(classAssignments) do
+				if type(targets) == "table" then
+					for targetName in pairs(targets) do
+						if type(targetName) == "string" and strlower(targetName) == lowerName then
+							targets[targetName] = nil
+							if sendUpdates then
+								self:SendNormalBlessings(pally, classID, targetName)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+function PallyPower:RemoveManualMemberFromRoster(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name then return end
+
+	local lowerName = strlower(name)
+	for classID = 1, PALLYPOWER_MAXCLASSES do
+		local classUnits = classes[classID]
+		if classUnits then
+			for i = #classUnits, 1, -1 do
+				local unit = classUnits[i]
+				if unit and unit.manualMember and unit.name and strlower(unit.name) == lowerName then
+					tremove(classUnits, i)
+					classlist[classID] = math.max((classlist[classID] or 1) - 1, 0)
+				end
+			end
+		end
+	end
+	for i = #roster, 1, -1 do
+		local unit = roster[i]
+		if unit and unit.manualMember and unit.name and strlower(unit.name) == lowerName then
+			tremove(roster, i)
+		end
+	end
+end
+
+function PallyPower:AddManualMemberToRoster(name, className)
+	name = self:NormalizeManualPallyName(name)
+	className = self:NormalizeManualMemberClass(className)
+	if not name or not className then return nil end
+	if self:GetGroupUnitName(name) then return nil end
+
+	local classID = self:GetClassID(className)
+	if not classID or classID < 1 then return nil end
+
+	self:RemoveManualMemberFromRoster(name)
+	local unit = {
+		manualMember = true,
+		unitid = MANUAL_MEMBER_UNITID,
+		name = name,
+		class = className,
+		rank = 0,
+		subgroup = 1,
+		visible = true,
+		inrange = true,
+		hasbuff = 9999,
+		specialbuff = false,
+		dead = false
+	}
+	tinsert(roster, unit)
+	tinsert(classes[classID], unit)
+	classlist[classID] = (classlist[classID] or 0) + 1
+	return unit
+end
+
 function PallyPower:CanRemoveManualPally(name)
 	local manualName = self:GetManualPallyKey(name)
+	if not manualName then return nil end
+	if self:GetGroupUnitName(manualName) then return nil end
+	return manualName
+end
+
+function PallyPower:CanRemoveManualMember(name)
+	local manualName = self:GetManualMemberKey(name)
 	if not manualName then return nil end
 	if self:GetGroupUnitName(manualName) then return nil end
 	return manualName
@@ -2280,13 +2710,164 @@ function PallyPower:EnsureManualAssignments(name)
 	end
 end
 
-function PallyPower:EnsureManualPally(name)
+function PallyPower:EnsureManualMember(name, className, skipPallySync)
+	name = self:NormalizeManualPallyName(name)
+	className = self:NormalizeManualMemberClass(className)
+	if not name or not className then return nil end
+
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
+	end
+
+	local groupName, groupClass = self:GetGroupUnitInfo(name)
+	if groupName then
+		return self:PromoteManualMember(name, groupName, groupClass, skipPallySync)
+	end
+
+	local manualName = self:GetManualMemberKey(name) or name
+	PallyPower_ManualMembers[manualName] = className
+	self:AddManualMemberToRoster(manualName, className)
+
+	if className == "PALADIN" and not skipPallySync then
+		PallyPower_ManualPallys[manualName] = true
+		self:EnsureManualPally(manualName, true)
+	end
+	return manualName
+end
+
+function PallyPower:PromoteManualMember(manualName, groupName, groupClass, skipPallySync)
+	manualName = self:GetManualMemberKey(manualName) or self:NormalizeManualPallyName(manualName)
+	groupName = self:NormalizeManualPallyName(groupName) or manualName
+	if not manualName or not groupName then return nil end
+
+	local oldClassName = PallyPower_ManualMembers and PallyPower_ManualMembers[manualName]
+	local newClassName = self:NormalizeManualMemberClass(groupClass) or oldClassName
+	local oldClassID = self:GetClassID(oldClassName or "")
+	local newClassID = self:GetClassID(newClassName or "")
+
+	if PallyPower_ManualMembers then
+		PallyPower_ManualMembers[manualName] = nil
+	end
+	self:RemoveManualMemberFromRoster(manualName)
+	self:RenameManualMemberAssignments(manualName, groupName, oldClassID, newClassID, self:CheckLeader(self.player))
+
+	if oldClassName == "PALADIN" and newClassName ~= "PALADIN" then
+		local manualPallyName = self:GetManualPallyKey(manualName) or (AllPallys[manualName] and manualName)
+		if manualPallyName then
+			PallyPower_ManualPallys[manualPallyName] = nil
+			AllPallys[manualPallyName] = nil
+			PallyPower_Assignments[manualPallyName] = nil
+			PallyPower_NormalAssignments[manualPallyName] = nil
+			PallyPower_AuraAssignments[manualPallyName] = nil
+			promotedManualPallys[groupName] = nil
+			self:SyncRemove(manualPallyName)
+		end
+	elseif newClassName == "PALADIN" and not skipPallySync then
+		local manualPallyName = self:GetManualPallyKey(manualName)
+		if manualPallyName then
+			self:PromoteManualPally(manualPallyName, groupName, true)
+		end
+	end
+	return groupName
+end
+
+function PallyPower:RestoreManualMembers()
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
+		return
+	end
+
+	local manualNames = {}
+	for name in pairs(PallyPower_ManualMembers) do
+		tinsert(manualNames, name)
+	end
+
+	for _, name in ipairs(manualNames) do
+		local className = self:NormalizeManualMemberClass(PallyPower_ManualMembers[name])
+		if not className then
+			PallyPower_ManualMembers[name] = nil
+		else
+			PallyPower_ManualMembers[name] = className
+			local groupName, groupClass = self:GetGroupUnitInfo(name)
+			if groupName then
+				self:PromoteManualMember(name, groupName, groupClass)
+			else
+				self:EnsureManualMember(name, className)
+			end
+		end
+	end
+end
+
+function PallyPower:AddManualMember(name, className)
+	if InCombatLockdown() then return false end
+
+	name = self:NormalizeManualPallyName(name)
+	className = self:NormalizeManualMemberClass(className)
+	if not name then return false end
+	if not className then
+		self:Print(L["Select a class for this temporary member."])
+		return false
+	end
+
+	local groupName = self:GetGroupUnitName(name)
+	if groupName then
+		self:Print(format(L["%s is already in your group."], groupName))
+		return false
+	end
+
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
+	end
+	local manualName = self:GetManualMemberKey(name) or (className == "PALADIN" and self:GetManualPallyKey(name)) or name
+	local oldClassName = PallyPower_ManualMembers and PallyPower_ManualMembers[manualName]
+	if oldClassName and oldClassName ~= className then
+		self:RenameManualMemberAssignments(manualName, manualName, self:GetClassID(oldClassName), self:GetClassID(className), self:CheckLeader(self.player))
+		if oldClassName == "PALADIN" and className ~= "PALADIN" and self:GetManualPallyKey(manualName) then
+			self:RemoveManualPally(manualName, true)
+		end
+	end
+
+	PallyPower_ManualMembers[manualName] = className
+	self:EnsureManualMember(manualName, className)
+	self:UpdateLayout()
+	return true
+end
+
+function PallyPower:RemoveManualMember(name, skipPallySync)
+	if InCombatLockdown() then return false end
+
+	name = self:NormalizeManualPallyName(name)
+	if not name then return false end
+
+	local manualName = self:GetManualMemberKey(name) or name
+	local groupName = self:GetGroupUnitName(manualName)
+	if groupName then
+		self:Print(format(L["%s is already in your group and cannot be removed as a temporary member."], groupName))
+		return false
+	end
+	if not (PallyPower_ManualMembers and PallyPower_ManualMembers[manualName]) then
+		self:Print(format(L["%s is not a temporary member."], manualName))
+		return false
+	end
+
+	local className = PallyPower_ManualMembers[manualName]
+	PallyPower_ManualMembers[manualName] = nil
+	self:RemoveManualMemberFromRoster(manualName)
+	self:ClearManualMemberAssignments(manualName, self:CheckLeader(self.player))
+	if className == "PALADIN" and not skipPallySync and self:GetManualPallyKey(manualName) then
+		self:RemoveManualPally(manualName, true)
+	end
+	self:UpdateLayout()
+	return true
+end
+
+function PallyPower:EnsureManualPally(name, skipMemberSync)
 	name = self:NormalizeManualPallyName(name)
 	if not name then return nil end
 
 	local groupName = self:GetGroupUnitName(name)
 	if groupName then
-		return self:PromoteManualPally(name, groupName)
+		return self:PromoteManualPally(name, groupName, skipMemberSync)
 	end
 
 	if AllPallys[name] and not AllPallys[name].manual then
@@ -2307,11 +2888,14 @@ function PallyPower:EnsureManualPally(name)
 
 	AllPallys[name] = info
 	self:EnsureManualAssignments(name)
+	if not skipMemberSync then
+		self:EnsureManualMember(name, "PALADIN", true)
+	end
 	self:SyncAdd(name)
 	return name
 end
 
-function PallyPower:PromoteManualPally(manualName, groupName)
+function PallyPower:PromoteManualPally(manualName, groupName, skipMemberSync)
 	manualName = self:GetManualPallyKey(manualName) or self:NormalizeManualPallyName(manualName)
 	groupName = self:NormalizeManualPallyName(groupName) or manualName
 	if not manualName or not groupName then return nil end
@@ -2369,6 +2953,12 @@ function PallyPower:PromoteManualPally(manualName, groupName)
 	if wasManual then
 		promotedManualPallys[groupName] = self:GetAssignmentSnapshot(groupName) or manualSnapshot or true
 	end
+	if not skipMemberSync then
+		local manualMemberName = self:GetManualMemberKey(manualName)
+		if manualMemberName then
+			self:PromoteManualMember(manualMemberName, groupName, "PALADIN", true)
+		end
+	end
 	return groupName
 end
 
@@ -2402,7 +2992,7 @@ function PallyPower:RestoreManualPallys()
 	end
 end
 
-function PallyPower:AddManualPally(name)
+function PallyPower:AddManualPally(name, skipMemberSync)
 	if InCombatLockdown() then return false end
 
 	name = self:NormalizeManualPallyName(name)
@@ -2414,14 +3004,24 @@ function PallyPower:AddManualPally(name)
 		return false
 	end
 
-	local manualName = self:GetManualPallyKey(name) or name
+	local manualName = self:GetManualPallyKey(name) or self:GetManualMemberKey(name) or name
+	local manualMemberName = self:GetManualMemberKey(manualName)
+	if manualMemberName and PallyPower_ManualMembers[manualMemberName] ~= "PALADIN" then
+		self:RenameManualMemberAssignments(manualMemberName, manualMemberName, self:GetClassID(PallyPower_ManualMembers[manualMemberName]), self:GetClassID("PALADIN"), self:CheckLeader(self.player))
+	end
 	PallyPower_ManualPallys[manualName] = true
-	self:EnsureManualPally(manualName)
+	if not skipMemberSync then
+		if not PallyPower_ManualMembers then
+			PallyPower_ManualMembers = {}
+		end
+		PallyPower_ManualMembers[manualName] = "PALADIN"
+	end
+	self:EnsureManualPally(manualName, skipMemberSync)
 	self:UpdateLayout()
 	return true
 end
 
-function PallyPower:RemoveManualPally(name)
+function PallyPower:RemoveManualPally(name, skipMemberSync)
 	if InCombatLockdown() then return false end
 
 	name = self:NormalizeManualPallyName(name)
@@ -2444,6 +3044,9 @@ function PallyPower:RemoveManualPally(name)
 	PallyPower_NormalAssignments[manualName] = nil
 	PallyPower_AuraAssignments[manualName] = nil
 	self:SyncRemove(manualName)
+	if not skipMemberSync and self:GetManualMemberKey(manualName) then
+		self:RemoveManualMember(manualName, true)
+	end
 	self:UpdateLayout()
 	return true
 end
@@ -2506,6 +3109,265 @@ function PallyPowerBlessings_RemoveManualPally(target)
 		name = box:GetText()
 	end
 	local removed = PallyPower:RemoveManualPally(name)
+	if box then
+		if removed then
+			box:SetText("")
+		end
+		box:ClearFocus()
+	end
+end
+
+function PallyPower:IsManualMemberDropdownFrameOpen()
+	local currentDropDown = LUIDDM.UIDropDownMenu_GetCurrentDropDown and LUIDDM:UIDropDownMenu_GetCurrentDropDown()
+	local listFrame = _G["L_DropDownList1"]
+	return currentDropDown == self.manualMemberMenuFrame and listFrame and listFrame:IsShown()
+end
+
+function PallyPower:IsManualMemberDropdownOpen(menuName)
+	return self.manualMemberDropdown == menuName and self:IsManualMemberDropdownFrameOpen()
+end
+
+function PallyPowerBlessings_SelectManualMemberClass(classID)
+	if classID and PallyPower.ClassID[classID] and PallyPower.ClassID[classID] ~= "PET" then
+		PallyPower.manualMemberClassID = classID
+		PallyPower:UpdateManualMemberClassButton()
+	end
+	PallyPower.manualMemberDropdown = nil
+	LUIDDM:CloseDropDownMenus()
+end
+
+function PallyPowerBlessings_ShowManualMemberClassMenu(button)
+	if InCombatLockdown() then return end
+	if PallyPower:IsManualMemberDropdownOpen("class") then
+		PallyPower.manualMemberDropdown = nil
+		LUIDDM:CloseDropDownMenus()
+		return
+	end
+	if PallyPower:IsManualMemberDropdownFrameOpen() then
+		LUIDDM:CloseDropDownMenus()
+	end
+
+	local menu = {}
+	for classID = 1, PALLYPOWER_MAXCLASSES do
+		local className = PallyPower.ClassID[classID]
+		if className and className ~= "PET" then
+			local currentClassID = classID
+			tinsert(menu, {
+				text = PallyPower:GetClassColoredDisplayName(currentClassID),
+				checked = function()
+					return PallyPower:GetManualMemberClassID() == currentClassID
+				end,
+				func = function()
+					PallyPowerBlessings_SelectManualMemberClass(currentClassID)
+				end
+			})
+		end
+	end
+	tinsert(menu, {text = _G.CANCEL, func = function() PallyPower.manualMemberDropdown = nil end, isNotRadio = true, notCheckable = 1})
+	PallyPower.manualMemberDropdown = "class"
+	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
+	PallyPower:ClearManualMemberGuildMenuScroll()
+end
+
+function PallyPower:GetManualMemberGuildMenuMinWidth(members)
+	local measureFont = self.manualMemberGuildMeasureFont
+	if not measureFont then
+		local parent = self.manualMemberMenuFrame or UIParent
+		measureFont = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmallLeft")
+		self.manualMemberGuildMeasureFont = measureFont
+	end
+
+	local width = 0
+	local function measure(text)
+		if text and text ~= "" then
+			measureFont:SetText(text)
+			width = math.max(width, measureFont:GetStringWidth() or 0)
+		end
+	end
+
+	measure(PALLYPOWER_MANUALMEMBER_GUILD)
+	measure(_G.CANCEL)
+	if type(members) == "table" then
+		for _, member in ipairs(members) do
+			measure(member.name)
+		end
+	end
+	measureFont:SetText("")
+	return math.max(math.ceil(width) + 10, 120)
+end
+
+function PallyPower:ClearManualMemberGuildMenuScroll()
+	local listFrame = _G["L_DropDownList1"]
+	if listFrame and self.manualMemberGuildScrollActive then
+		listFrame:EnableMouseWheel(false)
+		listFrame:SetScript("OnMouseWheel", nil)
+	end
+
+	local scrollBar = _G["PallyPowerManualMemberGuildScrollBar"]
+	if scrollBar then
+		scrollBar.guildButton = nil
+		scrollBar:Hide()
+	end
+	self.manualMemberGuildScrollActive = nil
+end
+
+function PallyPower:EnsureManualMemberGuildScrollBar(listFrame)
+	local scrollBar = _G["PallyPowerManualMemberGuildScrollBar"]
+	if not scrollBar then
+		scrollBar = CreateFrame("Slider", "PallyPowerManualMemberGuildScrollBar", listFrame, "UIPanelScrollBarTemplate")
+		scrollBar:SetWidth(16)
+		if scrollBar.SetValueStep then
+			scrollBar:SetValueStep(1)
+		end
+		if scrollBar.SetStepsPerPage then
+			scrollBar:SetStepsPerPage(1)
+		end
+		if scrollBar.SetObeyStepOnDrag then
+			scrollBar:SetObeyStepOnDrag(true)
+		end
+		scrollBar:SetScript("OnValueChanged", function(self, value)
+			if PallyPower.manualMemberGuildScrollUpdating then return end
+
+			local newOffset = math.floor((value or 1) + 0.5)
+			if newOffset ~= PallyPower.manualMemberGuildOffset then
+				PallyPowerBlessings_ShowManualMemberGuildMenu(self.guildButton, newOffset, true)
+			end
+		end)
+	end
+
+	scrollBar:SetParent(listFrame)
+	scrollBar:SetFrameLevel(listFrame:GetFrameLevel() + 5)
+	scrollBar:ClearAllPoints()
+	scrollBar:SetPoint("TOPRIGHT", listFrame, "TOPRIGHT", -6, -22)
+	scrollBar:SetPoint("BOTTOMRIGHT", listFrame, "BOTTOMRIGHT", -6, 22)
+	return scrollBar
+end
+
+function PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth)
+	local listFrame = _G["L_DropDownList1"]
+	if not listFrame then return end
+
+	if totalMembers and totalMembers > MANUAL_MEMBER_GUILD_PAGE_SIZE then
+		local maxOffset = math.max(totalMembers - MANUAL_MEMBER_GUILD_PAGE_SIZE + 1, 1)
+		offset = math.min(math.max(offset or self.manualMemberGuildOffset or 1, 1), maxOffset)
+		if not self.manualMemberGuildScrollHooked and listFrame.HookScript then
+			listFrame:HookScript("OnHide", function()
+				PallyPower:ClearManualMemberGuildMenuScroll()
+				if PallyPower.manualMemberDropdown == "guild" then
+					PallyPower.manualMemberDropdown = nil
+				end
+			end)
+			self.manualMemberGuildScrollHooked = true
+		end
+
+		self.manualMemberGuildScrollActive = true
+		local scrollBar = self:EnsureManualMemberGuildScrollBar(listFrame)
+		scrollBar.guildButton = button
+		self.manualMemberGuildScrollUpdating = true
+		scrollBar:SetMinMaxValues(1, maxOffset)
+		scrollBar:SetValue(offset)
+		self.manualMemberGuildScrollUpdating = nil
+		scrollBar:Show()
+
+		local baseWidth = (guildMenuMinWidth or listFrame.maxWidth or math.max(listFrame:GetWidth() - 25, 120)) + 25
+		listFrame:SetWidth(baseWidth + MANUAL_MEMBER_GUILD_SCROLLBAR_WIDTH)
+		listFrame:EnableMouseWheel(true)
+		listFrame:SetScript("OnMouseWheel", function(_, delta)
+			local guildScrollBar = _G["PallyPowerManualMemberGuildScrollBar"]
+			if not guildScrollBar or not guildScrollBar:IsShown() then return end
+
+			local minValue, maxValue = guildScrollBar:GetMinMaxValues()
+			local nextValue = guildScrollBar:GetValue() or 1
+			if delta and delta > 0 then
+				nextValue = nextValue - 1
+			else
+				nextValue = nextValue + 1
+			end
+			guildScrollBar:SetValue(math.min(math.max(nextValue, minValue), maxValue))
+		end)
+	else
+		self:ClearManualMemberGuildMenuScroll()
+	end
+end
+
+function PallyPowerBlessings_ShowManualMemberGuildMenu(button, offset, forceOpen)
+	if InCombatLockdown() then return end
+	if PallyPower:IsManualMemberDropdownOpen("guild") and not forceOpen then
+		PallyPower:ClearManualMemberGuildMenuScroll()
+		PallyPower.manualMemberDropdown = nil
+		LUIDDM:CloseDropDownMenus()
+		return
+	end
+	if PallyPower:IsManualMemberDropdownFrameOpen() then
+		PallyPower:ClearManualMemberGuildMenuScroll()
+		LUIDDM:CloseDropDownMenus()
+	end
+
+	local menu = {}
+	local totalMembers = 0
+	local members
+	local guildMenuMinWidth = PallyPower:GetManualMemberGuildMenuMinWidth()
+	tinsert(menu, {text = PALLYPOWER_MANUALMEMBER_GUILD, isTitle = true, isNotRadio = true, notCheckable = 1, minWidth = guildMenuMinWidth})
+	if not IsInGuild or not IsInGuild() then
+		tinsert(menu, {text = PALLYPOWER_MANUALMEMBER_GUILD_NOGUILD, disabled = true, isNotRadio = true, notCheckable = 1, minWidth = guildMenuMinWidth})
+	else
+		members = PallyPower:GetMaxLevelGuildMembers()
+		guildMenuMinWidth = PallyPower:GetManualMemberGuildMenuMinWidth(members)
+		menu[1].minWidth = guildMenuMinWidth
+		totalMembers = #members
+		if totalMembers == 0 then
+			tinsert(menu, {text = PALLYPOWER_MANUALMEMBER_GUILD_EMPTY, disabled = true, isNotRadio = true, notCheckable = 1, minWidth = guildMenuMinWidth})
+		else
+			local maxOffset = math.max(totalMembers - MANUAL_MEMBER_GUILD_PAGE_SIZE + 1, 1)
+			offset = math.min(math.max(offset or PallyPower.manualMemberGuildOffset or 1, 1), maxOffset)
+			PallyPower.manualMemberGuildOffset = offset
+
+			local lastIndex = math.min(offset + MANUAL_MEMBER_GUILD_PAGE_SIZE - 1, totalMembers)
+			for index = offset, lastIndex do
+				local member = members[index]
+				local entry = member
+				tinsert(menu, {
+					text = PallyPower:GetClassColoredText(entry.name, entry.className),
+					isNotRadio = true,
+					notCheckable = 1,
+					minWidth = guildMenuMinWidth,
+					func = function()
+						PallyPower:ClearManualMemberGuildMenuScroll()
+						PallyPower.manualMemberDropdown = nil
+						LUIDDM:CloseDropDownMenus()
+						PallyPower:AddManualMember(entry.name, entry.className)
+					end
+				})
+			end
+		end
+	end
+	tinsert(menu, {text = _G.CANCEL, func = function() PallyPower:ClearManualMemberGuildMenuScroll(); PallyPower.manualMemberDropdown = nil end, isNotRadio = true, notCheckable = 1, minWidth = guildMenuMinWidth})
+	PallyPower.manualMemberDropdown = "guild"
+	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
+	PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth)
+end
+
+function PallyPowerBlessings_AddManualMember(editBox)
+	local box = editBox or _G["PallyPowerBlessingsFrameManualMemberName"]
+	if not box then return end
+	local added = PallyPower:AddManualMember(box:GetText(), PallyPower:GetManualMemberClassID())
+	if added then
+		box:SetText("")
+	end
+	box:ClearFocus()
+end
+
+function PallyPowerBlessings_RemoveManualMember(target)
+	local name
+	local box
+	if type(target) == "string" then
+		name = target
+	else
+		box = target or _G["PallyPowerBlessingsFrameManualMemberName"]
+		if not box then return end
+		name = box:GetText()
+	end
+	local removed = PallyPower:RemoveManualMember(name)
 	if box then
 		if removed then
 			box:SetText("")
@@ -2692,13 +3554,14 @@ function PallyPower:UpdateRoster()
 			end
 		end
 	end
+	self:RestoreManualMembers()
 	self:RestoreManualPallys()
 	self:UpdateLayout()
 end
 
 function PallyPower:ScanClass(classID)
 	for _, unit in pairs(classes[classID]) do
-		if unit.unitid then
+		if unit.unitid and not unit.manualMember then
 			local spellID, gspellID = self:GetSpellID(classID, unit.name)
 			local spell = self.Spells[spellID]
 			local spell2 = self.GSpells[spellID]
@@ -2813,6 +3676,7 @@ function PallyPower:CreateLayout()
 			end
 		end
 	end
+	self:CreateManualMemberControls()
 	self:UpdateLayout()
 end
 
@@ -2827,6 +3691,129 @@ function PallyPower:CountClasses()
 		end
 	end
 	return val
+end
+
+function PallyPower:HideManualPallyControls()
+	local controls = {
+		"PallyPowerBlessingsFrameManualPallyName",
+		"PallyPowerBlessingsFrameManualPallyAdd",
+		"PallyPowerBlessingsFrameManualPallyRemove",
+		"PallyPowerBlessingsFrameManualPallyText"
+	}
+	for _, controlName in ipairs(controls) do
+		local control = _G[controlName]
+		if control then
+			control:Hide()
+			if control.EnableMouse then
+				control:EnableMouse(false)
+			end
+		end
+	end
+end
+
+function PallyPower:UpdateManualMemberClassButton()
+	local classButton = _G["PallyPowerBlessingsFrameManualMemberClass"]
+	if classButton then
+		classButton:SetText(self:GetClassColoredDisplayName(self:GetManualMemberClassID()))
+	end
+end
+
+function PallyPower:CreateManualMemberControls()
+	local frame = _G["PallyPowerBlessingsFrame"]
+	if not frame then return end
+
+	self:HideManualPallyControls()
+	if _G["PallyPowerBlessingsFrameManualMemberName"] then return end
+
+	local label = frame:CreateFontString("PallyPowerBlessingsFrameManualMemberText", "OVERLAY", "GameFontHighlightSmall")
+	label:SetSize(160, 16)
+	label:SetJustifyH("LEFT")
+	label:SetText(PALLYPOWER_MANUALMEMBER)
+	label:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 156, 45)
+
+	local editBox = CreateFrame("EditBox", "PallyPowerBlessingsFrameManualMemberName", frame, "InputBoxTemplate")
+	editBox:SetSize(130, 20)
+	editBox:SetAutoFocus(false)
+	editBox:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 156, 24)
+	editBox:SetScript("OnEnterPressed", function(self)
+		PallyPowerBlessings_AddManualMember(self)
+	end)
+	editBox:SetScript("OnEscapePressed", function(self)
+		self:ClearFocus()
+	end)
+	editBox:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	editBox:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	local classButton = CreateFrame("Button", "PallyPowerBlessingsFrameManualMemberClass", frame, "GameMenuButtonTemplate")
+	classButton:SetSize(135, 20)
+	classButton:SetPoint("LEFT", editBox, "RIGHT", 7, 0)
+	classButton:SetScript("OnClick", function(self)
+		PallyPowerBlessings_ShowManualMemberClassMenu(self)
+	end)
+	classButton:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_CLASS_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	classButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	local addButton = CreateFrame("Button", "PallyPowerBlessingsFrameManualMemberAdd", frame, "GameMenuButtonTemplate")
+	addButton:SetSize(55, 20)
+	addButton:SetText(PALLYPOWER_MANUALPALLY_ADD)
+	addButton:SetPoint("LEFT", classButton, "RIGHT", 7, 0)
+	addButton:SetScript("OnClick", function()
+		local box = _G["PallyPowerBlessingsFrameManualMemberName"]
+		PallyPowerBlessings_AddManualMember(box)
+		if box then
+			box:ClearFocus()
+		end
+	end)
+	addButton:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_ADD_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	addButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	local guildButton = CreateFrame("Button", "PallyPowerBlessingsFrameManualMemberGuild", frame, "GameMenuButtonTemplate")
+	guildButton:SetSize(75, 20)
+	guildButton:SetText(PALLYPOWER_MANUALMEMBER_GUILD)
+	guildButton:SetPoint("LEFT", addButton, "RIGHT", 7, 0)
+	guildButton:SetScript("OnClick", function(self)
+		PallyPowerBlessings_ShowManualMemberGuildMenu(self)
+	end)
+	guildButton:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_GUILD_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	guildButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	self:UpdateManualMemberClassButton()
 end
 
 function PallyPower:UpdateLayout()
@@ -2998,10 +3985,14 @@ function PallyPower:UpdateLayout()
 					pButton:SetAttribute("spell1", gSpell)
 				end
 				-- Set Maintank role in a raid
-				if IsInRaid() then
+				if IsInRaid() and not unit.manualMember then
 					pButton:SetAttribute("ctrl-type1", "maintank")
 					pButton:SetAttribute("ctrl-action1", "toggle")
 					pButton:SetAttribute("ctrl-unit1", unit.unitid)
+				else
+					pButton:SetAttribute("ctrl-type1", nil)
+					pButton:SetAttribute("ctrl-action1", nil)
+					pButton:SetAttribute("ctrl-unit1", nil)
 				end
 				-- Normal Blessings (Right Mouse Button [2]) - disable Normal Blessing of Salvation globally. Enabled in PButtonPreClick().
 				pButton:SetAttribute("type2", "spell")
@@ -3114,6 +4105,9 @@ end
 -- "need_small" for missing single blessing
 -- "have" for no missing buff
 local function ClassifyUnitBuffStateForButton(unit)
+	if unit.manualMember then
+		return "have"
+	end
 	-- do not highlight dead players in combat
 	if unit.dead and InCombatLockdown() then
 		return "have"
@@ -3203,7 +4197,7 @@ function PallyPower:GetBuffExpiration(classID)
 	local class = classes[classID]
 	local classExpire, classDuration, specialExpire, specialDuration = 9999, 9999, 9999, 9999
 	for _, unit in pairs(class) do
-		if unit.unitid then
+		if unit.unitid and not unit.manualMember then
 			local j = 1
 			local spellID, gspellID = self:GetSpellID(classID, unit.name)
 			local isMight = (spellID == 2) or (gspellID == 2)
@@ -3302,6 +4296,7 @@ function PallyPower:PButtonPreClick(button, mousebutton)
 	local playerID = button:GetAttribute("playerID")
 	if not self.isWrath and classID and playerID then
 		local unit = classes[classID][playerID]
+		if unit and unit.manualMember then return end
 		local spellID, gspellID = self:GetSpellID(classID, unit.name)
 		local nSpell, gSpell = self:CanBuffBlessing(spellID, gspellID, unit.unitid)
 		-- Enable Greater Blessing of Salvation on everyone but do not allow Blessing of Salvation on tanks if SalvInCombat is disabled
@@ -3427,7 +4422,9 @@ function PallyPower:UpdatePButton(button, baseName, classID, playerID, mousebutt
 		end
 		if unit.name then
 			local shortname = Ambiguate(unit.name, "short")
-			if unit.unitid:find("pet") then
+			if unit.manualMember then
+				name:SetText("|cff00ccff+|r " .. shortname)
+			elseif unit.unitid:find("pet") then
 				name:SetText("|T132242:0|t "..shortname)
 			else
 				name:SetText(shortname)
@@ -3588,7 +4585,7 @@ function PallyPower:GetUnitAndSpellSmart(classid, mousebutton)
 			local spellID, gspellID = self:GetSpellID(classid, unit.name)
 			local spell = self.Spells[spellID]
 			local gspell = self.GSpells[gspellID]
-			if (not unit.specialbuff) and (IsSpellInRange(gspell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) then
+			if (not unit.manualMember) and (not unit.specialbuff) and (IsSpellInRange(gspell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) then
 				local penalty = 0
 				local buffExpire, buffDuration, buffName = self:IsBuffActive(spell, gspell, unit.unitid)
 				local nSpell, gSpell = self:CanBuffBlessing(spellID, gspellID, unit.unitid)
@@ -3606,7 +4603,7 @@ function PallyPower:GetUnitAndSpellSmart(classid, mousebutton)
 				if not self.opt.display.buffDuration then
 					for i = 1, recipients do
 						local unitID = classes[classid][i]
-						if IsSpellInRange(gspell, unitID.unitid) ~= 1 or UnitIsDeadOrGhost(unitID.unitid) or UnitIsAFK(unitID.unitid) or not UnitIsConnected(unitID.unitid) then
+						if unitID.manualMember or IsSpellInRange(gspell, unitID.unitid) ~= 1 or UnitIsDeadOrGhost(unitID.unitid) or UnitIsAFK(unitID.unitid) or not UnitIsConnected(unitID.unitid) then
 							recipients = recipients - 1
 						end
 					end
@@ -3647,7 +4644,7 @@ function PallyPower:GetUnitAndSpellSmart(classid, mousebutton)
 					classMaxSpell = gSpell
 					classMinExpire = (buffExpire or 0)
 				end
-			elseif (UnitIsVisible(unit.unitid) == false and not UnitIsAFK(unit.unitid) and UnitIsConnected(unit.unitid)) and (IsInRaid() == false or #classes[classid] > 3) then
+			elseif (not unit.manualMember) and (UnitIsVisible(unit.unitid) == false and not UnitIsAFK(unit.unitid) and UnitIsConnected(unit.unitid)) and (IsInRaid() == false or #classes[classid] > 3) then
 				classNeedsBuff = false
 			end
 		end
@@ -3665,7 +4662,7 @@ function PallyPower:GetUnitAndSpellSmart(classid, mousebutton)
 			local spell = self.Spells[spellID]
 			local spell2 = self.GSpells[spellID]
 			local gspell = self.GSpells[gspellID]
-			if (IsSpellInRange(spell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) then
+			if (not unit.manualMember) and (IsSpellInRange(spell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) then
 				local penalty = 0
 				local greaterBlessing = false
 				local buffExpire, buffDuration, buffName = self:IsBuffActive(spell, spell2, unit.unitid)
@@ -3709,7 +4706,7 @@ function PallyPower:GetUnitAndSpellSmart(classid, mousebutton)
 				if not self.opt.display.buffDuration then
 					for i = 1, recipients do
 						local unitID = classes[classid][i]
-						if (unitID.hasbuff and unitID.hasbuff > 300) or IsSpellInRange(nSpell, unitID.unitid) ~= 1 or UnitIsDeadOrGhost(unitID.unitid) or UnitIsAFK(unitID.unitid) or not UnitIsConnected(unitID.unitid) then
+						if unitID.manualMember or (unitID.hasbuff and unitID.hasbuff > 300) or IsSpellInRange(nSpell, unitID.unitid) ~= 1 or UnitIsDeadOrGhost(unitID.unitid) or UnitIsAFK(unitID.unitid) or not UnitIsConnected(unitID.unitid) then
 							recipients = recipients - 1
 						end
 					end
@@ -3878,7 +4875,7 @@ function PallyPower:ButtonPostClick(button, mousebutton)
 					local unit = classes[classid][i]
 					local spellID, gspellID = self:GetSpellID(classid, unit.name)
 					local _, gspell = self:CanBuffBlessing(spellID, gspellID, unit.unitid)
-					if gspell and (IsSpellInRange(gspell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) and (not UnitIsAFK(unit.unitid)) and UnitIsConnected(unit.unitid) then
+					if (not unit.manualMember) and gspell and (IsSpellInRange(gspell, unit.unitid) == 1) and (not UnitIsDeadOrGhost(unit.unitid)) and (not UnitIsAFK(unit.unitid)) and UnitIsConnected(unit.unitid) then
 						local unitName = GetUnitName(classes[classid][i].unitid, true)
 						table.insert(targetNames, unitName)
 						numPlayers = numPlayers + 1
@@ -3993,7 +4990,7 @@ function PallyPower:AutoBuff(button, mousebutton)
 					local spellID, gspellID = self:GetSpellID(i, unit.name)
 					local spell = self.Spells[spellID]
 					local gspell = self.GSpells[gspellID]
-					if (not unit.specialbuff) and (IsSpellInRange(gspell, unit.unitid) == 1) and not UnitIsDeadOrGhost(unit.unitid) then
+					if (not unit.manualMember) and (not unit.specialbuff) and (IsSpellInRange(gspell, unit.unitid) == 1) and not UnitIsDeadOrGhost(unit.unitid) then
 						local penalty = 0
 						local buffExpire, buffDuration, buffName = self:IsBuffActive(spell, gspell, unit.unitid)
 						local nSpell, gSpell = self:CanBuffBlessing(spellID, gspellID, unit.unitid)
@@ -4045,7 +5042,7 @@ function PallyPower:AutoBuff(button, mousebutton)
 							classMaxSpell = gSpell
 							classMinExpire = (buffExpire or 0)
 						end
-					elseif (UnitIsVisible(unit.unitid) == false and not UnitIsAFK(unit.unitid) and UnitIsConnected(unit.unitid)) and (IsInRaid() == false or #classes[i] > 3) then
+					elseif (not unit.manualMember) and (UnitIsVisible(unit.unitid) == false and not UnitIsAFK(unit.unitid) and UnitIsConnected(unit.unitid)) and (IsInRaid() == false or #classes[i] > 3) then
 						classNeedsBuff = false
 					end
 				end
@@ -4080,7 +5077,7 @@ function PallyPower:AutoBuff(button, mousebutton)
 			local spell = self.Spells[spellID]
 			local spell2 = self.GSpells[spellID]
 			local gspell = self.GSpells[gspellID]
-			if (IsSpellInRange(spell, unit.unitid) == 1) and not UnitIsDeadOrGhost(unit.unitid) then
+			if (not unit.manualMember) and (IsSpellInRange(spell, unit.unitid) == 1) and not UnitIsDeadOrGhost(unit.unitid) then
 				local penalty = 0
 				local buffExpire, buffDuration, buffName = self:IsBuffActive(spell, spell2, unit.unitid)
 				local nSpell, gSpell = self:CanBuffBlessing(spellID, gspellID, unit.unitid)
