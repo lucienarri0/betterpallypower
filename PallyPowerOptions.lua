@@ -684,6 +684,53 @@ PallyPower.options = {
 							end
 						}
 					}
+				},
+				guild_ranks = {
+					order = 6,
+					name = L["Guild Rank Management"],
+					type = "group",
+					inline = true,
+					args = {
+						guild_ranks_desc = {
+							order = 0,
+							type = "description",
+							name = L["Select the guild ranks shown in the guild member dropdown. Leave all ranks unselected to show every rank."],
+							width = "full"
+						},
+						guild_ranks_status = {
+							order = 1,
+							type = "description",
+							name = function()
+								if not IsInGuild or not IsInGuild() then
+									return L["You are not in a guild."]
+								end
+								return L["No guild ranks found."]
+							end,
+							width = "full",
+							hidden = function()
+								return IsInGuild and IsInGuild() and next(PallyPower:GetGuildRankOptions()) ~= nil
+							end
+						},
+						guild_rank_filter = {
+							order = 2,
+							type = "multiselect",
+							name = L["Guild Ranks"],
+							desc = L["Select the guild ranks shown in the guild member dropdown. Leave all ranks unselected to show every rank."],
+							width = "full",
+							values = function()
+								return PallyPower:GetGuildRankOptions()
+							end,
+							hidden = function()
+								return not IsInGuild or not IsInGuild() or next(PallyPower:GetGuildRankOptions()) == nil
+							end,
+							get = function(info, key)
+								return PallyPower:IsGuildRankSelected(key)
+							end,
+							set = function(info, key, val)
+								PallyPower:SetGuildRankSelected(key, val)
+							end
+						}
+					}
 				}
 			}
 		},
