@@ -3196,7 +3196,16 @@ function PallyPower:GetManualMemberGuildMenuMinWidth(members)
 	return math.max(math.ceil(width) + 10, 120)
 end
 
-function PallyPower:ClearManualMemberGuildMenuScroll()
+local function PallyPowerManualMemberGuildEntry_OnClick(_, entry)
+	if not entry then return end
+
+	PallyPower:ClearManualMemberGuildMenuScroll()
+	PallyPower.manualMemberDropdown = nil
+	LUIDDM:CloseDropDownMenus()
+	PallyPower:AddManualMember(entry.name, entry.className)
+end
+
+function PallyPower:ClearManualMemberGuildMenuScroll(keepMenuOpen)
 	local listFrame = _G["L_DropDownList1"]
 	if listFrame and self.manualMemberGuildScrollActive then
 		listFrame:EnableMouseWheel(false)
@@ -3208,7 +3217,108 @@ function PallyPower:ClearManualMemberGuildMenuScroll()
 		scrollBar.guildButton = nil
 		scrollBar:Hide()
 	end
+	self.manualMemberGuildMembers = nil
 	self.manualMemberGuildScrollActive = nil
+	self.manualMemberGuildDraggingScroll = nil
+	self.manualMemberGuildMouseDown = nil
+	if not keepMenuOpen then
+		self.manualMemberGuildKeepOpen = nil
+		self.manualMemberGuildButton = nil
+	end
+end
+
+function PallyPower:RefreshManualMemberGuildMenu(offset)
+	local listFrame = _G["L_DropDownList1"]
+	local members = self.manualMemberGuildMembers
+	if not (listFrame and listFrame:IsShown() and type(members) == "table") then
+		return false
+	end
+
+	local totalMembers = #members
+	if totalMembers <= MANUAL_MEMBER_GUILD_PAGE_SIZE then
+		return false
+	end
+
+	local maxOffset = math.max(totalMembers - MANUAL_MEMBER_GUILD_PAGE_SIZE + 1, 1)
+	offset = math.min(math.max(offset or self.manualMemberGuildOffset or 1, 1), maxOffset)
+	self.manualMemberGuildOffset = offset
+
+	for row = 1, MANUAL_MEMBER_GUILD_PAGE_SIZE do
+		local entry = members[offset + row - 1]
+		local menuButton = _G["L_DropDownList1Button" .. (row + 1)]
+		if menuButton then
+			if entry then
+				menuButton:SetText(self:GetClassColoredText(entry.name, entry.className))
+				menuButton.arg1 = entry
+				menuButton.arg2 = nil
+				menuButton.func = PallyPowerManualMemberGuildEntry_OnClick
+				menuButton.value = entry.name
+				menuButton:Enable()
+				menuButton:Show()
+			else
+				menuButton:SetText("")
+				menuButton.arg1 = nil
+				menuButton.arg2 = nil
+				menuButton.func = nil
+				menuButton.value = nil
+				menuButton:Disable()
+				menuButton:Hide()
+			end
+		end
+	end
+
+	return true
+end
+
+function PallyPower:IsManualMemberGuildMenuMouseOver()
+	local listFrame = _G["L_DropDownList1"]
+	if listFrame and listFrame:IsShown() and listFrame:IsMouseOver() then
+		return true
+	end
+
+	local scrollBar = _G["PallyPowerManualMemberGuildScrollBar"]
+	if scrollBar and scrollBar:IsShown() and scrollBar:IsMouseOver() then
+		return true
+	end
+
+	local guildButton = self.manualMemberGuildButton
+	if guildButton and guildButton:IsShown() and guildButton:IsMouseOver() then
+		return true
+	end
+
+	return false
+end
+
+function PallyPower:KeepManualMemberGuildMenuOpen(listFrame)
+	if not listFrame then return end
+
+	listFrame.showTimer = nil
+	listFrame.isCounting = nil
+
+	if self.manualMemberGuildKeepOpenHooked or not listFrame.HookScript then return end
+
+	listFrame:HookScript("OnUpdate", function(frame)
+		if PallyPower.manualMemberDropdown ~= "guild" or not PallyPower.manualMemberGuildKeepOpen then
+			return
+		end
+
+		frame.showTimer = nil
+		frame.isCounting = nil
+
+		local mouseDown = IsMouseButtonDown and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton"))
+		if mouseDown and not PallyPower.manualMemberGuildMouseDown then
+			if not PallyPower.manualMemberGuildDraggingScroll and not PallyPower:IsManualMemberGuildMenuMouseOver() then
+				PallyPower:ClearManualMemberGuildMenuScroll()
+				PallyPower.manualMemberDropdown = nil
+				LUIDDM:CloseDropDownMenus()
+				return
+			end
+		elseif not mouseDown then
+			PallyPower.manualMemberGuildDraggingScroll = nil
+		end
+		PallyPower.manualMemberGuildMouseDown = mouseDown
+	end)
+	self.manualMemberGuildKeepOpenHooked = true
 end
 
 function PallyPower:EnsureManualMemberGuildScrollBar(listFrame)
@@ -3230,9 +3340,19 @@ function PallyPower:EnsureManualMemberGuildScrollBar(listFrame)
 
 			local newOffset = math.floor((value or 1) + 0.5)
 			if newOffset ~= PallyPower.manualMemberGuildOffset then
-				PallyPowerBlessings_ShowManualMemberGuildMenu(self.guildButton, newOffset, true)
+				if not PallyPower:RefreshManualMemberGuildMenu(newOffset) then
+					PallyPowerBlessings_ShowManualMemberGuildMenu(self.guildButton, newOffset, true)
+				end
 			end
 		end)
+		if scrollBar.HookScript then
+			scrollBar:HookScript("OnMouseDown", function()
+				PallyPower.manualMemberGuildDraggingScroll = true
+			end)
+			scrollBar:HookScript("OnMouseUp", function()
+				PallyPower.manualMemberGuildDraggingScroll = nil
+			end)
+		end
 	end
 
 	scrollBar:SetParent(listFrame)
@@ -3243,24 +3363,26 @@ function PallyPower:EnsureManualMemberGuildScrollBar(listFrame)
 	return scrollBar
 end
 
-function PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth)
+function PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth, members)
 	local listFrame = _G["L_DropDownList1"]
 	if not listFrame then return end
+	self:KeepManualMemberGuildMenuOpen(listFrame)
+
+	if not self.manualMemberGuildScrollHooked and listFrame.HookScript then
+		listFrame:HookScript("OnHide", function()
+			PallyPower:ClearManualMemberGuildMenuScroll()
+			if PallyPower.manualMemberDropdown == "guild" then
+				PallyPower.manualMemberDropdown = nil
+			end
+		end)
+		self.manualMemberGuildScrollHooked = true
+	end
 
 	if totalMembers and totalMembers > MANUAL_MEMBER_GUILD_PAGE_SIZE then
 		local maxOffset = math.max(totalMembers - MANUAL_MEMBER_GUILD_PAGE_SIZE + 1, 1)
 		offset = math.min(math.max(offset or self.manualMemberGuildOffset or 1, 1), maxOffset)
-		if not self.manualMemberGuildScrollHooked and listFrame.HookScript then
-			listFrame:HookScript("OnHide", function()
-				PallyPower:ClearManualMemberGuildMenuScroll()
-				if PallyPower.manualMemberDropdown == "guild" then
-					PallyPower.manualMemberDropdown = nil
-				end
-			end)
-			self.manualMemberGuildScrollHooked = true
-		end
-
 		self.manualMemberGuildScrollActive = true
+		self.manualMemberGuildMembers = members
 		local scrollBar = self:EnsureManualMemberGuildScrollBar(listFrame)
 		scrollBar.guildButton = button
 		self.manualMemberGuildScrollUpdating = true
@@ -3286,7 +3408,7 @@ function PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offs
 			guildScrollBar:SetValue(math.min(math.max(nextValue, minValue), maxValue))
 		end)
 	else
-		self:ClearManualMemberGuildMenuScroll()
+		self:ClearManualMemberGuildMenuScroll(true)
 	end
 end
 
@@ -3331,20 +3453,18 @@ function PallyPowerBlessings_ShowManualMemberGuildMenu(button, offset, forceOpen
 					isNotRadio = true,
 					notCheckable = 1,
 					minWidth = guildMenuMinWidth,
-					func = function()
-						PallyPower:ClearManualMemberGuildMenuScroll()
-						PallyPower.manualMemberDropdown = nil
-						LUIDDM:CloseDropDownMenus()
-						PallyPower:AddManualMember(entry.name, entry.className)
-					end
+					func = PallyPowerManualMemberGuildEntry_OnClick,
+					arg1 = entry
 				})
 			end
 		end
 	end
 	tinsert(menu, {text = _G.CANCEL, func = function() PallyPower:ClearManualMemberGuildMenuScroll(); PallyPower.manualMemberDropdown = nil end, isNotRadio = true, notCheckable = 1, minWidth = guildMenuMinWidth})
 	PallyPower.manualMemberDropdown = "guild"
+	PallyPower.manualMemberGuildKeepOpen = true
+	PallyPower.manualMemberGuildButton = button
 	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
-	PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth)
+	PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth, members)
 end
 
 function PallyPowerBlessings_AddManualMember(editBox)
