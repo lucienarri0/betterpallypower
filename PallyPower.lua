@@ -216,6 +216,7 @@ function PallyPower:OnEnable()
 	self:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 	self:RegisterEvent("GROUP_JOINED")
 	self:RegisterEvent("GROUP_LEFT")
+	self:RegisterEvent("GUILD_ROSTER_UPDATE")
 	self:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 	self:RegisterEvent("UPDATE_BINDINGS", "BindKeys")
 	self:RegisterEvent("CHANNEL_UI_UPDATE", "ReportChannels")
@@ -1657,6 +1658,10 @@ function PallyPower:PLAYER_ENTERING_WORLD()
 
 end
 
+function PallyPower:GUILD_ROSTER_UPDATE()
+	LibStub("AceConfigRegistry-3.0"):NotifyChange("PallyPower")
+end
+
 function PallyPower:ZONE_CHANGED()
 	if IsInRaid() then
 		self.zone = GetRealZoneText()
@@ -2384,6 +2389,120 @@ function PallyPower:GetExpansionMaxLevel()
 	return 60
 end
 
+local function AddGuildRank(ranks, seen, rankIndex, rankName)
+	rankIndex = tonumber(rankIndex)
+	if not rankIndex or not rankName or rankName == "" then return end
+
+	local key = tostring(rankIndex)
+	if seen[key] then return end
+
+	tinsert(ranks, {index = rankIndex, name = rankName})
+	seen[key] = true
+end
+
+local function GetGuildControlRankName(rankIndex)
+	local ok, rankName = pcall(GuildControlGetRankName, rankIndex)
+	if ok then
+		return rankName
+	end
+end
+
+function PallyPower:EnsureGuildRankOptions()
+	if not self.opt then return {} end
+	if type(self.opt.guildRanks) ~= "table" then
+		self.opt.guildRanks = {}
+	end
+	return self.opt.guildRanks
+end
+
+function PallyPower:GetGuildRanks()
+	local ranks, seen = {}, {}
+	if not IsInGuild or not IsInGuild() then
+		return ranks
+	end
+
+	if GuildRoster then
+		GuildRoster()
+	end
+	if GetNumGuildMembers and GetGuildRosterInfo then
+		for i = 1, GetNumGuildMembers() do
+			local _, rankName, rankIndex = GetGuildRosterInfo(i)
+			AddGuildRank(ranks, seen, rankIndex, rankName)
+		end
+	end
+	if GuildControlGetNumRanks and GuildControlGetRankName then
+		local ok, numRanks = pcall(GuildControlGetNumRanks)
+		numRanks = ok and tonumber(numRanks) or 0
+		if numRanks > 0 then
+			local firstRankName = GetGuildControlRankName(0)
+			local offset = firstRankName and firstRankName ~= "" and 0 or 1
+			for i = 0, numRanks - 1 do
+				AddGuildRank(ranks, seen, i, GetGuildControlRankName(i + offset))
+			end
+		end
+	end
+
+	tsort(
+		ranks,
+		function(a, b)
+			return a.index < b.index
+		end
+	)
+	return ranks
+end
+
+function PallyPower:PruneGuildRankSelections(ranks)
+	local selectedRanks = self.opt and self.opt.guildRanks
+	if type(selectedRanks) ~= "table" or type(ranks) ~= "table" or #ranks == 0 then return end
+
+	local currentRanks = {}
+	for _, rank in ipairs(ranks) do
+		currentRanks[tostring(rank.index)] = true
+	end
+	for rankIndex in pairs(selectedRanks) do
+		if not currentRanks[tostring(rankIndex)] then
+			selectedRanks[rankIndex] = nil
+		end
+	end
+end
+
+function PallyPower:GetGuildRankOptions()
+	local values = {}
+	local ranks = self:GetGuildRanks()
+	self:PruneGuildRankSelections(ranks)
+	for _, rank in ipairs(ranks) do
+		values[tostring(rank.index)] = rank.name
+	end
+	return values
+end
+
+function PallyPower:HasSelectedGuildRankFilter()
+	local selectedRanks = self.opt and self.opt.guildRanks
+	if type(selectedRanks) ~= "table" then return false end
+
+	for _, selected in pairs(selectedRanks) do
+		if selected then
+			return true
+		end
+	end
+	return false
+end
+
+function PallyPower:IsGuildRankSelected(rankIndex)
+	local selectedRanks = self.opt and self.opt.guildRanks
+	return type(selectedRanks) == "table" and selectedRanks[tostring(rankIndex)] == true
+end
+
+function PallyPower:SetGuildRankSelected(rankIndex, selected)
+	local selectedRanks = self:EnsureGuildRankOptions()
+	if selected then
+		selectedRanks[tostring(rankIndex)] = true
+	else
+		selectedRanks[tostring(rankIndex)] = nil
+	end
+	self:ClearManualMemberGuildMenuScroll()
+end
+
 function PallyPower:GetMaxLevelGuildMembers()
 	local members = {}
 	if not IsInGuild or not IsInGuild() then
@@ -2397,11 +2516,12 @@ function PallyPower:GetMaxLevelGuildMembers()
 		return members
 	end
 	local maxLevel = self:GetExpansionMaxLevel()
+	local filterGuildRanks = self:HasSelectedGuildRankFilter()
 	for i = 1, GetNumGuildMembers() do
-		local name, _, _, level, localizedClass, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
+		local name, rankName, rankIndex, level, localizedClass, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
 		local className = self:NormalizeManualMemberClass(classFileName) or self:NormalizeManualMemberClass(localizedClass)
-		if name and level == maxLevel and className then
-			tinsert(members, {name = self:RemoveRealmName(name), className = className})
+		if name and level == maxLevel and className and (not filterGuildRanks or self:IsGuildRankSelected(rankIndex)) then
+			tinsert(members, {name = self:RemoveRealmName(name), className = className, rankIndex = rankIndex, rankName = rankName})
 		end
 	end
 	tsort(

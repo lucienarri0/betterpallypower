@@ -43,6 +43,7 @@ PALLYPOWER_DEFAULT_VALUES = {
 			offsetY = 0
 		},
 		enabled = true,
+		guildRanks = {},
 		layout = "Layout 2",
 		mainTank = false,
 		mainTankGSpellsDP = 4,
@@ -102,6 +103,7 @@ PALLYPOWER_OTHER_VALUES = {
 			showClassButtons = false
 		},
 		enabled = true,
+		guildRanks = {},
 		layout = "Layout 2",
 		mainTank = false,
 		mainTankGSpellsDP = 0,
