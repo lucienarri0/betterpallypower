@@ -344,6 +344,7 @@ end
 function PallyPowerBlessings_Clear()
 	if InCombatLockdown() then return end
 
+	PallyPower:ClearManualMembers()
 	if GetNumGroupMembers() > 0 and PallyPower:CheckLeader(PallyPower.player) then
 		PallyPower:ClearAssignments(PallyPower.player)
 		PallyPower:SendMessage("CLEAR")
@@ -3297,6 +3298,27 @@ function PallyPower:RemoveManualMember(name, skipPallySync)
 	return true
 end
 
+function PallyPower:ClearManualMembers()
+	if InCombatLockdown() then return 0 end
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
+		return 0
+	end
+
+	local manualNames = {}
+	for name in pairs(PallyPower_ManualMembers) do
+		tinsert(manualNames, name)
+	end
+
+	local removed = 0
+	for _, name in ipairs(manualNames) do
+		if self:RemoveManualMember(name) then
+			removed = removed + 1
+		end
+	end
+	return removed
+end
+
 function PallyPower:EnsureManualPally(name, skipMemberSync)
 	name = self:NormalizeManualPallyName(name)
 	if not name then return nil end
@@ -3944,6 +3966,7 @@ function PallyPower:ImportMRTRaidGroup(group)
 	if InCombatLockdown() then return false end
 	if not group or type(group.members) ~= "table" then return false end
 
+	self:ClearManualMembers()
 	local imported = 0
 	local alreadyInGroup = 0
 	for _, member in ipairs(group.members) do
