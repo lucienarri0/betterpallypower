@@ -296,9 +296,9 @@ do
 	if version == ("@project-".."version@") then -- split string so it doesn't get replaced by packager
 		version = "Development version"
 	end
-	PALLYPOWER_NAME = "  " .. L["PallyPower Classic"] .. " (" .. version .. ")"
+	PALLYPOWER_NAME = "  BetterPallyPower (" .. version .. ")"
 end
-PALLYPOWER_KEYCAT = L["PallyPower Classic"]
+PALLYPOWER_KEYCAT = "BetterPallyPower"
 PALLYPOWER_CLEAR = L["Clear"]
 PALLYPOWER_CLEAR_DESC = L["PP_CLEAR_TOOLTIP"]
 PALLYPOWER_REFRESH = L["Refresh"]
@@ -326,6 +326,9 @@ PALLYPOWER_MANUALMEMBER_GUILD = L["Guild"]
 PALLYPOWER_MANUALMEMBER_GUILD_DESC = L["Choose a max-level guild member to add as a temporary member."]
 PALLYPOWER_MANUALMEMBER_GUILD_EMPTY = L["No max-level guild members found."]
 PALLYPOWER_MANUALMEMBER_GUILD_NOGUILD = L["You are not in a guild."]
+PALLYPOWER_MANUALMEMBER_MRT = L["Import from MRT"]
+PALLYPOWER_MANUALMEMBER_MRT_DESC = L["Choose a MRT raid group to import as temporary members."]
+PALLYPOWER_MANUALMEMBER_MRT_EMPTY = L["No MRT raid groups found."]
 PALLYPOWER_OPTIONS = L["Options"]
 PALLYPOWER_OPTIONS_DESC = L["OPTIONS_BUTTON_TOOLTIP"]
 

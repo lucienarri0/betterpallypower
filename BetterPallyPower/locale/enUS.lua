@@ -95,6 +95,13 @@ L["No max-level guild members found."] = "No max-level guild members found."
 L["No guild ranks found."] = "No guild ranks found."
 L["Select the guild ranks shown in the guild member dropdown. Leave all ranks unselected to show every rank."] = "Select the guild ranks shown in the guild member dropdown. Leave all ranks unselected to show every rank."
 L["You are not in a guild."] = "You are not in a guild."
+L["Import from MRT"] = "Import from MRT"
+L["Choose a MRT raid group to import as temporary members."] = "Choose a MRT raid group to import as temporary members."
+L["No MRT raid groups found."] = "No MRT raid groups found."
+L["MRT Raid Group"] = "MRT Raid Group"
+L["MRT import skipped %s: class not found."] = "MRT import skipped %s: class not found."
+L["Imported %d member(s) from MRT raid group %s."] = "Imported %d member(s) from MRT raid group %s."
+L["Skipped %d MRT member(s) already in your group."] = "Skipped %d MRT member(s) already in your group."
 L["Select a class for this temporary member."] = "Select a class for this temporary member."
 L["%s is already in your group."] = "%s is already in your group."
 L["%s is already in your group and cannot be removed manually."] = "%s is already in your group and cannot be removed manually."
@@ -119,6 +126,7 @@ L["If you enable this option, you will not be allowed to assign Blessing of Wisd
 L["LAYOUT_TOOLTIP"] = [=[Vertical [Left/Right]
 Horizontal [Up/Down]]=]
 L["Main PallyPower Settings"] = "Main PallyPower Settings"
+L["Main BetterPallyPower Settings"] = "Main BetterPallyPower Settings"
 L["Main Tank / Main Assist Roles"] = "Main Tank / Main Assist Roles"
 L["MAIN_ROLES_DESCRIPTION"] = [=[These options can be used to automatically assign alternate Normal Blessings for any Greater Blessing assigned to Warriors, Druids, or Paladins |cffff0000only|r.
 
