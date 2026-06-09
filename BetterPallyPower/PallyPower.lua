@@ -56,6 +56,20 @@ local promotedManualPallys = {}
 local MANUAL_MEMBER_UNITID = "manualmember"
 local MANUAL_MEMBER_GUILD_PAGE_SIZE = 10
 local MANUAL_MEMBER_GUILD_SCROLLBAR_WIDTH = 18
+local MRT_RAID_GROUP_MENU_PAGE_SIZE = 10
+local MRT_RAID_GROUP_SCROLLBAR_WIDTH = 18
+local MRT_BLIZZARD_CLASS_ID = {
+	[1] = "WARRIOR",
+	[2] = "PALADIN",
+	[3] = "HUNTER",
+	[4] = "ROGUE",
+	[5] = "PRIEST",
+	[6] = "DEATHKNIGHT",
+	[7] = "SHAMAN",
+	[8] = "MAGE",
+	[9] = "WARLOCK",
+	[11] = "DRUID",
+}
 
 local lastMsg = ""
 local prevBuffDuration
@@ -107,7 +121,7 @@ function PallyPower:OnInitialize()
 	self.options.args.profiles = LibStub("AceDBOptions-3.0"):GetOptionsTable(self.db)
 
 	LibStub("AceConfig-3.0"):RegisterOptionsTable("PallyPower", self.options, {"pp", "pallypower"})
-	self.optionsFrame = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("PallyPower", "PallyPower")
+	self.optionsFrame = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("PallyPower", "BetterPallyPower")
 
 	LSM3:Register("background", "None", "Interface\\Tooltips\\UI-Tooltip-Background")
 	LSM3:Register("background", "Banto", "Interface\\AddOns\\betterpallypower\\Skins\\Banto")
@@ -330,6 +344,7 @@ end
 function PallyPowerBlessings_Clear()
 	if InCombatLockdown() then return end
 
+	PallyPower:ClearManualMembers()
 	if GetNumGroupMembers() > 0 and PallyPower:CheckLeader(PallyPower.player) then
 		PallyPower:ClearAssignments(PallyPower.player)
 		PallyPower:SendMessage("CLEAR")
@@ -2503,6 +2518,26 @@ function PallyPower:SetGuildRankSelected(rankIndex, selected)
 	self:ClearManualMemberGuildMenuScroll()
 end
 
+function PallyPower:GetGuildMemberClass(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name or not IsInGuild or not IsInGuild() then return nil end
+
+	if GuildRoster then
+		GuildRoster()
+	end
+	if not GetNumGuildMembers or not GetGuildRosterInfo then
+		return nil
+	end
+
+	local lowerName = strlower(name)
+	for i = 1, GetNumGuildMembers() do
+		local guildName, _, _, _, localizedClass, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
+		if guildName and strlower(self:RemoveRealmName(guildName)) == lowerName then
+			return self:NormalizeManualMemberClass(classFileName) or self:NormalizeManualMemberClass(localizedClass)
+		end
+	end
+end
+
 function PallyPower:GetMaxLevelGuildMembers()
 	local members = {}
 	if not IsInGuild or not IsInGuild() then
@@ -2531,6 +2566,288 @@ function PallyPower:GetMaxLevelGuildMembers()
 		end
 	)
 	return members
+end
+
+function PallyPower:StripMRTText(text)
+	if type(text) ~= "string" then return nil end
+
+	text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+	text = text:gsub("^%s+", ""):gsub("%s+$", "")
+	return text ~= "" and text or nil
+end
+
+function PallyPower:NormalizeMRTMemberClass(class, fieldName)
+	local field = strlower(tostring(fieldName or ""))
+	local classID = tonumber(class)
+	if classID and (field == "classid" or field == "class_id" or MRT_BLIZZARD_CLASS_ID[classID]) then
+		return self:NormalizeManualMemberClass(MRT_BLIZZARD_CLASS_ID[classID])
+	end
+	return self:NormalizeManualMemberClass(class)
+end
+
+function PallyPower:IsLikelyMRTPlayerName(name)
+	name = self:NormalizeManualPallyName(name)
+	if not name then return false end
+	if #name > 64 then return false end
+	if tonumber(name) then return false end
+	if self:NormalizeManualMemberClass(name) then return false end
+	return not name:find("[%s,;:%[%]{}()]")
+end
+
+function PallyPower:AddMRTMember(members, seenNames, name, className, classField)
+	name = self:NormalizeManualPallyName(name)
+	if not self:IsLikelyMRTPlayerName(name) then return end
+
+	local lowerName = strlower(name)
+	if seenNames[lowerName] then return end
+
+	seenNames[lowerName] = true
+	tinsert(members, {name = name, className = self:NormalizeMRTMemberClass(className, classField)})
+end
+
+function PallyPower:ParseMRTMemberLine(line)
+	line = self:StripMRTText(line)
+	if not line then return nil end
+
+	line = line:gsub("^[%-%*%d%.%)]%s*", "")
+	local first, second = line:match("^([^,;:%s]+)[,;:%s]+([^,;:%s]+)")
+	if first and second then
+		local firstClass = self:NormalizeManualMemberClass(first)
+		local secondClass = self:NormalizeManualMemberClass(second)
+		if firstClass and self:IsLikelyMRTPlayerName(second) then
+			return second, firstClass
+		elseif secondClass and self:IsLikelyMRTPlayerName(first) then
+			return first, secondClass
+		end
+	end
+
+	if self:IsLikelyMRTPlayerName(line) then
+		return line, nil
+	end
+end
+
+function PallyPower:CollectMRTMembersFromString(text, members, seenNames, allowBareName)
+	text = self:StripMRTText(text)
+	if not text then return end
+
+	for line in text:gmatch("[^\r\n]+") do
+		local name, className = self:ParseMRTMemberLine(line)
+		if name and (allowBareName or className) then
+			self:AddMRTMember(members, seenNames, name, className)
+		end
+	end
+end
+
+function PallyPower:IsMRTMemberContainerKey(key)
+	key = strlower(tostring(key or ""))
+	return key == "data"
+		or key == "group"
+		or key == "groups"
+		or key == "list"
+		or key == "members"
+		or key == "players"
+		or key == "raid"
+		or key == "raiders"
+		or key == "roster"
+		or key:match("^g%d+$")
+		or key:match("^group%d+$")
+end
+
+function PallyPower:CollectMRTMembers(value, members, seenNames, seenTables, depth, allowBareName)
+	if type(value) == "string" then
+		self:CollectMRTMembersFromString(value, members, seenNames, allowBareName)
+		return
+	end
+	if type(value) ~= "table" or seenTables[value] or depth > 5 then return end
+
+	seenTables[value] = true
+
+	local name = value.name or value.player or value.playerName or value.unitName or value.charName or value.character
+	local className, classField
+	for _, field in ipairs({"class", "className", "classFileName", "classFilename", "classToken", "classID", "classId", "class_id"}) do
+		if value[field] ~= nil then
+			className = value[field]
+			classField = field
+			break
+		end
+	end
+	if not name and type(value[1]) == "string" then
+		local firstClass = self:NormalizeManualMemberClass(value[1])
+		if firstClass and type(value[2]) == "string" then
+			name = value[2]
+			className = className or firstClass
+		else
+			name = value[1]
+			className = className or value[2]
+		end
+	end
+	if name and (className or allowBareName) then
+		self:AddMRTMember(members, seenNames, name, className, classField)
+	end
+
+	for key, child in pairs(value) do
+		if type(child) == "table" then
+			if type(key) == "number" or self:IsMRTMemberContainerKey(key) then
+				self:CollectMRTMembers(child, members, seenNames, seenTables, depth + 1, true)
+			end
+		elseif type(child) == "string" then
+			if type(key) == "number" or allowBareName or self:IsMRTMemberContainerKey(key) then
+				self:CollectMRTMembersFromString(child, members, seenNames, true)
+			elseif type(key) == "string" and self:IsLikelyMRTPlayerName(key) and self:NormalizeMRTMemberClass(child) then
+				self:AddMRTMember(members, seenNames, key, child)
+			end
+		elseif type(key) == "string" and self:IsLikelyMRTPlayerName(key) and self:NormalizeMRTMemberClass(child) then
+			self:AddMRTMember(members, seenNames, key, child)
+		end
+	end
+end
+
+function PallyPower:GetMRTRaidGroupMembers(groupData, allowBareName)
+	local members = {}
+	self:CollectMRTMembers(groupData, members, {}, {}, 0, allowBareName == true)
+	return members
+end
+
+function PallyPower:IsMRTRaidGroupContainerKey(key)
+	key = strlower(tostring(key or ""))
+	return key == "raidgroups"
+		or key == "raidgroup"
+		or key == "raidgroupsdb"
+		or key == "raidgroupssaver"
+		or key == "raidgroupssaved"
+		or key == "rg"
+		or (key:find("raid") and key:find("group"))
+end
+
+function PallyPower:IsMRTRaidGroupListKey(key)
+	key = strlower(tostring(key or ""))
+	return key == "profiles"
+		or key == "quickload"
+		or key == "quickloads"
+		or key == "quick_load"
+		or key == "quick_loads"
+		or key == "quickloadprofiles"
+		or key == "saved"
+		or key == "saves"
+		or key == "savedgroups"
+		or key == "savedraidgroups"
+end
+
+function PallyPower:GetMRTRaidGroupTimestamp(groupData)
+	if type(groupData) ~= "table" then return nil end
+
+	local timestamp = tonumber(groupData.time or groupData.date or groupData.timestamp or groupData.created or groupData.updated or groupData.lastUpdate or groupData.lastUsed or groupData.lastUse or groupData.mtime)
+	if timestamp and timestamp > 100000000000 then
+		timestamp = math.floor(timestamp / 1000)
+	end
+	return timestamp
+end
+
+function PallyPower:GetMRTRaidGroupName(groupData, fallbackKey, fallbackIndex)
+	if type(groupData) == "table" then
+		for _, field in ipairs({"name", "title", "raidName", "groupName", "saveName", "rosterName"}) do
+			local value = self:StripMRTText(groupData[field])
+			if value then return value end
+		end
+	end
+
+	if type(fallbackKey) == "string" and not self:IsMRTRaidGroupContainerKey(fallbackKey) then
+		local fallbackName = self:StripMRTText(fallbackKey)
+		if fallbackName and fallbackName ~= "" then
+			return fallbackName
+		end
+	end
+
+	return format("%s %d", L["MRT Raid Group"], fallbackIndex or 1)
+end
+
+function PallyPower:GetMRTRaidGroupSignature(name, members)
+	local names = {}
+	for _, member in ipairs(members) do
+		tinsert(names, strlower(member.name or ""))
+	end
+	tsort(names)
+	return strlower(name or "") .. "\001" .. table.concat(names, "\001")
+end
+
+function PallyPower:AddMRTRaidGroupCandidate(groups, signatures, groupData, fallbackKey)
+	local members = self:GetMRTRaidGroupMembers(groupData, type(groupData) == "string")
+	if #members == 0 then return false end
+
+	local name = self:GetMRTRaidGroupName(groupData, fallbackKey, #groups + 1)
+	local signature = self:GetMRTRaidGroupSignature(name, members)
+	if signatures[signature] then return true end
+
+	signatures[signature] = true
+	tinsert(groups, {
+		name = name,
+		members = members,
+		timestamp = self:GetMRTRaidGroupTimestamp(groupData),
+		order = #groups + 1
+	})
+	return true
+end
+
+function PallyPower:CollectMRTRaidGroupsFromContainer(container, groups, signatures, seenTables, depth)
+	if type(container) ~= "table" or seenTables[container] or depth > 6 then return end
+
+	seenTables[container] = true
+	for key, child in pairs(container) do
+		if type(child) == "table" then
+			if self:IsMRTRaidGroupListKey(key) then
+				self:CollectMRTRaidGroupsFromContainer(child, groups, signatures, seenTables, depth + 1)
+			elseif not self:AddMRTRaidGroupCandidate(groups, signatures, child, key) then
+				self:CollectMRTRaidGroupsFromContainer(child, groups, signatures, seenTables, depth + 1)
+			end
+		elseif type(child) == "string" then
+			if not self:IsMRTRaidGroupListKey(key) then
+				self:AddMRTRaidGroupCandidate(groups, signatures, child, key)
+			end
+		end
+	end
+end
+
+function PallyPower:ScanMRTRaidGroupsForContainers(node, groups, signatures, seenTables, depth)
+	if type(node) ~= "table" or seenTables[node] or depth > 4 then return end
+
+	seenTables[node] = true
+	for key, child in pairs(node) do
+		if type(child) == "table" then
+			if self:IsMRTRaidGroupContainerKey(key) then
+				self:CollectMRTRaidGroupsFromContainer(child, groups, signatures, {}, 0)
+			else
+				self:ScanMRTRaidGroupsForContainers(child, groups, signatures, seenTables, depth + 1)
+			end
+		end
+	end
+end
+
+function PallyPower:GetMRTRaidGroups()
+	local groups = {}
+	local signatures = {}
+	local roots = {_G.VMRT, _G.VExRT}
+
+	for _, root in ipairs(roots) do
+		if type(root) == "table" then
+			self:ScanMRTRaidGroupsForContainers(root, groups, signatures, {}, 0)
+		end
+	end
+
+	tsort(
+		groups,
+		function(a, b)
+			local aTime = a.timestamp or 0
+			local bTime = b.timestamp or 0
+			if aTime ~= bTime then
+				return aTime > bTime
+			end
+			if a.name ~= b.name then
+				return strlower(a.name) < strlower(b.name)
+			end
+			return (a.order or 0) < (b.order or 0)
+		end
+	)
+	return groups
 end
 
 function PallyPower:HasBlessingAssignments(name)
@@ -2981,6 +3298,27 @@ function PallyPower:RemoveManualMember(name, skipPallySync)
 	return true
 end
 
+function PallyPower:ClearManualMembers()
+	if InCombatLockdown() then return 0 end
+	if not PallyPower_ManualMembers then
+		PallyPower_ManualMembers = {}
+		return 0
+	end
+
+	local manualNames = {}
+	for name in pairs(PallyPower_ManualMembers) do
+		tinsert(manualNames, name)
+	end
+
+	local removed = 0
+	for _, name in ipairs(manualNames) do
+		if self:RemoveManualMember(name) then
+			removed = removed + 1
+		end
+	end
+	return removed
+end
+
 function PallyPower:EnsureManualPally(name, skipMemberSync)
 	name = self:NormalizeManualPallyName(name)
 	if not name then return nil end
@@ -3287,6 +3625,7 @@ function PallyPowerBlessings_ShowManualMemberClassMenu(button)
 	PallyPower.manualMemberDropdown = "class"
 	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
 	PallyPower:ClearManualMemberGuildMenuScroll()
+	PallyPower:ClearManualMemberMRTMenuScroll()
 end
 
 function PallyPower:GetManualMemberGuildMenuMinWidth(members)
@@ -3542,6 +3881,7 @@ function PallyPowerBlessings_ShowManualMemberGuildMenu(button, offset, forceOpen
 	end
 	if PallyPower:IsManualMemberDropdownFrameOpen() then
 		PallyPower:ClearManualMemberGuildMenuScroll()
+		PallyPower:ClearManualMemberMRTMenuScroll()
 		LUIDDM:CloseDropDownMenus()
 	end
 
@@ -3585,6 +3925,332 @@ function PallyPowerBlessings_ShowManualMemberGuildMenu(button, offset, forceOpen
 	PallyPower.manualMemberGuildButton = button
 	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
 	PallyPower:UpdateManualMemberGuildMenuScroll(button, totalMembers, offset, guildMenuMinWidth, members)
+end
+
+function PallyPower:GetMRTRaidGroupMenuText(group)
+	if not group then return "" end
+	if group.timestamp and date then
+		return format("%s - %s", group.name, date("%Y-%m-%d %H:%M", group.timestamp))
+	end
+	return group.name or L["MRT Raid Group"]
+end
+
+function PallyPower:GetManualMemberMRTMenuMinWidth(groups)
+	local measureFont = self.manualMemberMRTMeasureFont
+	if not measureFont then
+		local parent = self.manualMemberMenuFrame or UIParent
+		measureFont = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmallLeft")
+		self.manualMemberMRTMeasureFont = measureFont
+	end
+
+	local width = 0
+	local function measure(text)
+		if text and text ~= "" then
+			measureFont:SetText(text)
+			width = math.max(width, measureFont:GetStringWidth() or 0)
+		end
+	end
+
+	measure(PALLYPOWER_MANUALMEMBER_MRT)
+	measure(_G.CANCEL)
+	if type(groups) == "table" then
+		for _, group in ipairs(groups) do
+			measure(self:GetMRTRaidGroupMenuText(group))
+		end
+	end
+	measureFont:SetText("")
+	return math.max(math.ceil(width) + 10, 160)
+end
+
+function PallyPower:ImportMRTRaidGroup(group)
+	if InCombatLockdown() then return false end
+	if not group or type(group.members) ~= "table" then return false end
+
+	self:ClearManualMembers()
+	local imported = 0
+	local alreadyInGroup = 0
+	for _, member in ipairs(group.members) do
+		local name = self:NormalizeManualPallyName(member.name)
+		local className = self:NormalizeManualMemberClass(member.className) or self:GetGuildMemberClass(name)
+		if name and className then
+			if self:GetGroupUnitName(name) then
+				alreadyInGroup = alreadyInGroup + 1
+			elseif self:AddManualMember(name, className) then
+				imported = imported + 1
+			end
+		elseif name then
+			self:Print(format(L["MRT import skipped %s: class not found."], name))
+		end
+	end
+
+	self:Print(format(L["Imported %d member(s) from MRT raid group %s."], imported, group.name or L["MRT Raid Group"]))
+	if alreadyInGroup > 0 then
+		self:Print(format(L["Skipped %d MRT member(s) already in your group."], alreadyInGroup))
+	end
+	return imported > 0
+end
+
+local function PallyPowerManualMemberMRTEntry_OnClick(_, group)
+	if not group then return end
+
+	PallyPower:ClearManualMemberMRTMenuScroll()
+	PallyPower.manualMemberDropdown = nil
+	LUIDDM:CloseDropDownMenus()
+	PallyPower:ImportMRTRaidGroup(group)
+end
+
+function PallyPower:ClearManualMemberMRTMenuScroll(keepMenuOpen)
+	local listFrame = _G["L_DropDownList1"]
+	if listFrame and self.manualMemberMRTScrollActive then
+		listFrame:EnableMouseWheel(false)
+		listFrame:SetScript("OnMouseWheel", nil)
+	end
+
+	local scrollBar = _G["PallyPowerManualMemberMRTScrollBar"]
+	if scrollBar then
+		scrollBar.mrtButton = nil
+		scrollBar:Hide()
+	end
+	self.manualMemberMRTGroups = nil
+	self.manualMemberMRTScrollActive = nil
+	self.manualMemberMRTDraggingScroll = nil
+	self.manualMemberMRTMouseDown = nil
+	if not keepMenuOpen then
+		self.manualMemberMRTKeepOpen = nil
+		self.manualMemberMRTButton = nil
+	end
+end
+
+function PallyPower:RefreshManualMemberMRTMenu(offset)
+	local listFrame = _G["L_DropDownList1"]
+	local groups = self.manualMemberMRTGroups
+	if not (listFrame and listFrame:IsShown() and type(groups) == "table") then
+		return false
+	end
+
+	local totalGroups = #groups
+	if totalGroups <= MRT_RAID_GROUP_MENU_PAGE_SIZE then
+		return false
+	end
+
+	local maxOffset = math.max(totalGroups - MRT_RAID_GROUP_MENU_PAGE_SIZE + 1, 1)
+	offset = math.min(math.max(offset or self.manualMemberMRTOffset or 1, 1), maxOffset)
+	self.manualMemberMRTOffset = offset
+
+	for row = 1, MRT_RAID_GROUP_MENU_PAGE_SIZE do
+		local entry = groups[offset + row - 1]
+		local menuButton = _G["L_DropDownList1Button" .. (row + 1)]
+		if menuButton then
+			if entry then
+				menuButton:SetText(self:GetMRTRaidGroupMenuText(entry))
+				menuButton.arg1 = entry
+				menuButton.arg2 = nil
+				menuButton.func = PallyPowerManualMemberMRTEntry_OnClick
+				menuButton.value = entry.name
+				menuButton:Enable()
+				menuButton:Show()
+			else
+				menuButton:SetText("")
+				menuButton.arg1 = nil
+				menuButton.arg2 = nil
+				menuButton.func = nil
+				menuButton.value = nil
+				menuButton:Disable()
+				menuButton:Hide()
+			end
+		end
+	end
+
+	return true
+end
+
+function PallyPower:IsManualMemberMRTMenuMouseOver()
+	local listFrame = _G["L_DropDownList1"]
+	if listFrame and listFrame:IsShown() and listFrame:IsMouseOver() then
+		return true
+	end
+
+	local scrollBar = _G["PallyPowerManualMemberMRTScrollBar"]
+	if scrollBar and scrollBar:IsShown() and scrollBar:IsMouseOver() then
+		return true
+	end
+
+	local mrtButton = self.manualMemberMRTButton
+	if mrtButton and mrtButton:IsShown() and mrtButton:IsMouseOver() then
+		return true
+	end
+
+	return false
+end
+
+function PallyPower:KeepManualMemberMRTMenuOpen(listFrame)
+	if not listFrame then return end
+
+	listFrame.showTimer = nil
+	listFrame.isCounting = nil
+
+	if self.manualMemberMRTKeepOpenHooked or not listFrame.HookScript then return end
+
+	listFrame:HookScript("OnUpdate", function(frame)
+		if PallyPower.manualMemberDropdown ~= "mrt" or not PallyPower.manualMemberMRTKeepOpen then
+			return
+		end
+
+		frame.showTimer = nil
+		frame.isCounting = nil
+
+		local mouseDown = IsMouseButtonDown and (IsMouseButtonDown("LeftButton") or IsMouseButtonDown("RightButton"))
+		if mouseDown and not PallyPower.manualMemberMRTMouseDown then
+			if not PallyPower.manualMemberMRTDraggingScroll and not PallyPower:IsManualMemberMRTMenuMouseOver() then
+				PallyPower:ClearManualMemberMRTMenuScroll()
+				PallyPower.manualMemberDropdown = nil
+				LUIDDM:CloseDropDownMenus()
+				return
+			end
+		elseif not mouseDown then
+			PallyPower.manualMemberMRTDraggingScroll = nil
+		end
+		PallyPower.manualMemberMRTMouseDown = mouseDown
+	end)
+	self.manualMemberMRTKeepOpenHooked = true
+end
+
+function PallyPower:EnsureManualMemberMRTScrollBar(listFrame)
+	local scrollBar = _G["PallyPowerManualMemberMRTScrollBar"]
+	if not scrollBar then
+		scrollBar = CreateFrame("Slider", "PallyPowerManualMemberMRTScrollBar", listFrame, "UIPanelScrollBarTemplate")
+		scrollBar:SetWidth(16)
+		if scrollBar.SetValueStep then
+			scrollBar:SetValueStep(1)
+		end
+		if scrollBar.SetStepsPerPage then
+			scrollBar:SetStepsPerPage(1)
+		end
+		if scrollBar.SetObeyStepOnDrag then
+			scrollBar:SetObeyStepOnDrag(true)
+		end
+		scrollBar:SetScript("OnValueChanged", function(self, value)
+			if PallyPower.manualMemberMRTScrollUpdating then return end
+
+			local newOffset = math.floor((value or 1) + 0.5)
+			if newOffset ~= PallyPower.manualMemberMRTOffset then
+				if not PallyPower:RefreshManualMemberMRTMenu(newOffset) then
+					PallyPowerBlessings_ShowManualMemberMRTMenu(self.mrtButton, newOffset, true)
+				end
+			end
+		end)
+		if scrollBar.HookScript then
+			scrollBar:HookScript("OnMouseDown", function()
+				PallyPower.manualMemberMRTDraggingScroll = true
+			end)
+			scrollBar:HookScript("OnMouseUp", function()
+				PallyPower.manualMemberMRTDraggingScroll = nil
+			end)
+		end
+	end
+
+	scrollBar:SetParent(listFrame)
+	scrollBar:SetFrameLevel(listFrame:GetFrameLevel() + 5)
+	scrollBar:ClearAllPoints()
+	scrollBar:SetPoint("TOPRIGHT", listFrame, "TOPRIGHT", -6, -22)
+	scrollBar:SetPoint("BOTTOMRIGHT", listFrame, "BOTTOMRIGHT", -6, 22)
+	return scrollBar
+end
+
+function PallyPower:UpdateManualMemberMRTMenuScroll(button, totalGroups, offset, mrtMenuMinWidth, groups)
+	local listFrame = _G["L_DropDownList1"]
+	if not listFrame then return end
+	self:KeepManualMemberMRTMenuOpen(listFrame)
+
+	if not self.manualMemberMRTScrollHooked and listFrame.HookScript then
+		listFrame:HookScript("OnHide", function()
+			PallyPower:ClearManualMemberMRTMenuScroll()
+			if PallyPower.manualMemberDropdown == "mrt" then
+				PallyPower.manualMemberDropdown = nil
+			end
+		end)
+		self.manualMemberMRTScrollHooked = true
+	end
+
+	if totalGroups and totalGroups > MRT_RAID_GROUP_MENU_PAGE_SIZE then
+		local maxOffset = math.max(totalGroups - MRT_RAID_GROUP_MENU_PAGE_SIZE + 1, 1)
+		offset = math.min(math.max(offset or self.manualMemberMRTOffset or 1, 1), maxOffset)
+		self.manualMemberMRTScrollActive = true
+		self.manualMemberMRTGroups = groups
+		local scrollBar = self:EnsureManualMemberMRTScrollBar(listFrame)
+		scrollBar.mrtButton = button
+		self.manualMemberMRTScrollUpdating = true
+		scrollBar:SetMinMaxValues(1, maxOffset)
+		scrollBar:SetValue(offset)
+		self.manualMemberMRTScrollUpdating = nil
+		scrollBar:Show()
+
+		local baseWidth = (mrtMenuMinWidth or listFrame.maxWidth or math.max(listFrame:GetWidth() - 25, 160)) + 25
+		listFrame:SetWidth(baseWidth + MRT_RAID_GROUP_SCROLLBAR_WIDTH)
+		listFrame:EnableMouseWheel(true)
+		listFrame:SetScript("OnMouseWheel", function(_, delta)
+			local mrtScrollBar = _G["PallyPowerManualMemberMRTScrollBar"]
+			if not mrtScrollBar or not mrtScrollBar:IsShown() then return end
+
+			local minValue, maxValue = mrtScrollBar:GetMinMaxValues()
+			local nextValue = mrtScrollBar:GetValue() or 1
+			if delta and delta > 0 then
+				nextValue = nextValue - 1
+			else
+				nextValue = nextValue + 1
+			end
+			mrtScrollBar:SetValue(math.min(math.max(nextValue, minValue), maxValue))
+		end)
+	else
+		self:ClearManualMemberMRTMenuScroll(true)
+	end
+end
+
+function PallyPowerBlessings_ShowManualMemberMRTMenu(button, offset, forceOpen)
+	if InCombatLockdown() then return end
+	if PallyPower:IsManualMemberDropdownOpen("mrt") and not forceOpen then
+		PallyPower:ClearManualMemberMRTMenuScroll()
+		PallyPower.manualMemberDropdown = nil
+		LUIDDM:CloseDropDownMenus()
+		return
+	end
+	if PallyPower:IsManualMemberDropdownFrameOpen() then
+		PallyPower:ClearManualMemberGuildMenuScroll()
+		PallyPower:ClearManualMemberMRTMenuScroll()
+		LUIDDM:CloseDropDownMenus()
+	end
+
+	local groups = PallyPower:GetMRTRaidGroups()
+	local totalGroups = #groups
+	local mrtMenuMinWidth = PallyPower:GetManualMemberMRTMenuMinWidth(groups)
+	local menu = {}
+	tinsert(menu, {text = PALLYPOWER_MANUALMEMBER_MRT, isTitle = true, isNotRadio = true, notCheckable = 1, minWidth = mrtMenuMinWidth})
+	if totalGroups == 0 then
+		tinsert(menu, {text = PALLYPOWER_MANUALMEMBER_MRT_EMPTY, disabled = true, isNotRadio = true, notCheckable = 1, minWidth = mrtMenuMinWidth})
+	else
+		local maxOffset = math.max(totalGroups - MRT_RAID_GROUP_MENU_PAGE_SIZE + 1, 1)
+		offset = math.min(math.max(offset or PallyPower.manualMemberMRTOffset or 1, 1), maxOffset)
+		PallyPower.manualMemberMRTOffset = offset
+
+		local lastIndex = math.min(offset + MRT_RAID_GROUP_MENU_PAGE_SIZE - 1, totalGroups)
+		for index = offset, lastIndex do
+			local group = groups[index]
+			tinsert(menu, {
+				text = PallyPower:GetMRTRaidGroupMenuText(group),
+				isNotRadio = true,
+				notCheckable = 1,
+				minWidth = mrtMenuMinWidth,
+				func = PallyPowerManualMemberMRTEntry_OnClick,
+				arg1 = group
+			})
+		end
+	end
+	tinsert(menu, {text = _G.CANCEL, func = function() PallyPower:ClearManualMemberMRTMenuScroll(); PallyPower.manualMemberDropdown = nil end, isNotRadio = true, notCheckable = 1, minWidth = mrtMenuMinWidth})
+	PallyPower.manualMemberDropdown = "mrt"
+	PallyPower.manualMemberMRTKeepOpen = true
+	PallyPower.manualMemberMRTButton = button
+	LUIDDM:EasyMenu(menu, PallyPower.manualMemberMenuFrame, button, 0, 0, "MENU")
+	PallyPower:UpdateManualMemberMRTMenuScroll(button, totalGroups, offset, mrtMenuMinWidth, groups)
 end
 
 function PallyPowerBlessings_AddManualMember(editBox)
@@ -4050,6 +4716,25 @@ function PallyPower:CreateManualMemberControls()
 		end
 	end)
 	guildButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	local mrtButton = CreateFrame("Button", "PallyPowerBlessingsFrameManualMemberMRT", frame, "GameMenuButtonTemplate")
+	mrtButton:SetSize(112, 20)
+	mrtButton:SetText(PALLYPOWER_MANUALMEMBER_MRT)
+	mrtButton:SetPoint("LEFT", guildButton, "RIGHT", 7, 0)
+	mrtButton:SetScript("OnClick", function(self)
+		PallyPowerBlessings_ShowManualMemberMRTMenu(self)
+	end)
+	mrtButton:SetScript("OnEnter", function(self)
+		if PallyPower.opt.ShowTooltips then
+			GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+			GameTooltip:SetText(PALLYPOWER_MANUALMEMBER_MRT_DESC)
+			GameTooltip:Show()
+			CursorUpdate(self)
+		end
+	end)
+	mrtButton:SetScript("OnLeave", function()
 		GameTooltip:Hide()
 	end)
 

@@ -6,7 +6,7 @@ local isPally = select(2, UnitClass("player")) == "PALADIN"
 -- AceConfig
 -------------------------------------------------------------------
 PallyPower.options = {
-	name = "  " .. L["PallyPower Classic"],
+	name = "  BetterPallyPower",
 	type = "group",
 	childGroups = "tab",
 	args = {
@@ -19,7 +19,7 @@ PallyPower.options = {
 			args = {
 				settings_show = {
 					order = 1,
-					name = L["Main PallyPower Settings"],
+					name = L["Main BetterPallyPower Settings"],
 					type = "group",
 					inline = true,
 					args = {
