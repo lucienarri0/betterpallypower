@@ -2578,7 +2578,7 @@ end
 function PallyPower:NormalizeMRTMemberClass(class, fieldName)
 	local field = strlower(tostring(fieldName or ""))
 	local classID = tonumber(class)
-	if classID and (field == "classid" or field == "class_id") then
+	if classID and (field == "classid" or field == "class_id" or MRT_BLIZZARD_CLASS_ID[classID]) then
 		return self:NormalizeManualMemberClass(MRT_BLIZZARD_CLASS_ID[classID])
 	end
 	return self:NormalizeManualMemberClass(class)
@@ -2718,6 +2718,20 @@ function PallyPower:IsMRTRaidGroupContainerKey(key)
 		or (key:find("raid") and key:find("group"))
 end
 
+function PallyPower:IsMRTRaidGroupListKey(key)
+	key = strlower(tostring(key or ""))
+	return key == "profiles"
+		or key == "quickload"
+		or key == "quickloads"
+		or key == "quick_load"
+		or key == "quick_loads"
+		or key == "quickloadprofiles"
+		or key == "saved"
+		or key == "saves"
+		or key == "savedgroups"
+		or key == "savedraidgroups"
+end
+
 function PallyPower:GetMRTRaidGroupTimestamp(groupData)
 	if type(groupData) ~= "table" then return nil end
 
@@ -2779,11 +2793,15 @@ function PallyPower:CollectMRTRaidGroupsFromContainer(container, groups, signatu
 	seenTables[container] = true
 	for key, child in pairs(container) do
 		if type(child) == "table" then
-			if not self:AddMRTRaidGroupCandidate(groups, signatures, child, key) then
+			if self:IsMRTRaidGroupListKey(key) then
+				self:CollectMRTRaidGroupsFromContainer(child, groups, signatures, seenTables, depth + 1)
+			elseif not self:AddMRTRaidGroupCandidate(groups, signatures, child, key) then
 				self:CollectMRTRaidGroupsFromContainer(child, groups, signatures, seenTables, depth + 1)
 			end
 		elseif type(child) == "string" then
-			self:AddMRTRaidGroupCandidate(groups, signatures, child, key)
+			if not self:IsMRTRaidGroupListKey(key) then
+				self:AddMRTRaidGroupCandidate(groups, signatures, child, key)
+			end
 		end
 	end
 end
