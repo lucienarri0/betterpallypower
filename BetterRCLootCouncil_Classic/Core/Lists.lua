@@ -2,7 +2,7 @@
 
 ---@type RCLootCouncil
 local addon = select(2, ...)
----@class RCLootCouncil_Classic
+---@class BetterRCLootCouncil_Classic
 local Classic = addon:GetModule("RCClassic")
 
 local List = {}

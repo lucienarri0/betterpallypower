@@ -1,0 +1,9 @@
+## Author: Potdisc
+## Interface: 11508, 20505, 50504
+## Notes: SavedVariables bridge for BetterRCLootCouncil Classic
+## Title: RCLootCouncil Classic SavedVariables Bridge
+## Version: 1.4.1
+## AllowLoadGameType: classic
+## SavedVariables: RCLootCouncilDB, RCLootCouncilLootDB
+
+RCLootCouncil_Classic.lua

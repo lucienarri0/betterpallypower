@@ -413,6 +413,7 @@ local mapIDsToText = {
    [548] = "Serpentshrine Cavern",
    [580] = "Sunwell Plateau",
    [550] = "Tempest Keep",
+   [568] = "Zul'Aman",
    [631] = "Icecrown Citadel",
    [533] = "Naxxramas",
    [249] = "Onyxia's Lair",

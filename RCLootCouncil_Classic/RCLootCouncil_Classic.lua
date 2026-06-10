@@ -1,0 +1,2 @@
+-- This bridge addon intentionally only loads the historical SavedVariables file.
+-- BetterRCLootCouncil_Classic depends on it and then reuses RCLootCouncilDB and RCLootCouncilLootDB.

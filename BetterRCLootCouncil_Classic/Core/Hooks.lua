@@ -1,6 +1,6 @@
 local _, addon = ...
 
----@class RCLootCouncil_ClassicModule
+---@class BetterRCLootCouncil_ClassicModule
 local Classic = addon:GetModule("RCClassic")
 local HistoryFrame = addon:GetModule("RCLootHistory")
 local hooks = {}

@@ -116,8 +116,53 @@ local playersData = { -- Update on login/encounter starts. it stores the informa
 	relics = {}, -- Relics key: slot number(1-3), value: item link
 } -- player's data that can be changed by the player (spec, equipped ilvl, gaers, relics etc)
 
+local function isMissingGuildRank(rank)
+	return not rank or rank == L["Unguilded"] or rank == L["Not Found"] or rank == "Unknown"
+end
+
+local function cacheLocalGuildRank(self, rank)
+	if not isMissingGuildRank(rank) and self.playerName then
+		Player:Get(self.playerName):UpdateFields{ rank = rank }
+	end
+end
+
+local function getBlizOptionsGroup(appName, ...)
+	local AceConfigDialog = LibStub("AceConfigDialog-3.0")
+	local key = appName
+	for n = 1, select("#", ...) do
+		key = key .. "\001" .. select(n, ...)
+	end
+	local group = AceConfigDialog.BlizOptions and AceConfigDialog.BlizOptions[appName] and AceConfigDialog.BlizOptions[appName][key]
+	return group, key
+end
+
+local function addOptionsFrame(self, name, parent, ...)
+	local AceConfigDialog = LibStub("AceConfigDialog-3.0")
+	local appName = "RCLootCouncil"
+	local ok, frame, categoryID = pcall(AceConfigDialog.AddToBlizOptions, AceConfigDialog, appName, name, parent, ...)
+	if ok then return frame, categoryID end
+
+	local err = tostring(frame)
+	local group, key = getBlizOptionsGroup(appName, ...)
+	if group and group.frame and group.frame.name then
+		return group.frame, group.frame.name
+	end
+
+	if not parent and err:find("given name") then
+		if AceConfigDialog.BlizOptions and AceConfigDialog.BlizOptions[appName] then
+			AceConfigDialog.BlizOptions[appName][key] = nil
+		end
+		ok, frame, categoryID = pcall(AceConfigDialog.AddToBlizOptions, AceConfigDialog, appName, self.baseName or self.name, parent, ...)
+		if ok then return frame, categoryID end
+		err = tostring(frame)
+	end
+
+	error(err, 2)
+end
+
 function RCLootCouncil:OnInitialize()
 	-- IDEA Consider if we want everything on self, or just whatever modules could need.
+	self.playersData = playersData -- Make it available to Classic overrides before OnEnable.
 	self.version = "3.21.1"
 	self.nnp = false
 	self.debug = false
@@ -299,9 +344,8 @@ function RCLootCouncil:OnEnable()
 	LibStub("AceConfigRegistry-3.0"):RegisterOptionsTable("RCLootCouncil", function() return self:OptionsTable() end)
 
 	-- add it to blizz options
-	self.optionsFrame = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("RCLootCouncil", "RCLootCouncil", nil, "settings")
-	self.optionsFrame.ml = LibStub("AceConfigDialog-3.0"):AddToBlizOptions("RCLootCouncil", "Master Looter",
-	                                                                       "RCLootCouncil", "mlSettings")
+	self.optionsFrame = addOptionsFrame(self, "RCLootCouncil", nil, "settings")
+	self.optionsFrame.ml = addOptionsFrame(self, "Master Looter", self.optionsFrame.name, "mlSettings")
 	self.playersData = playersData -- Make it globally available
 
 	self:ScheduleTimer("InitItemStorage", 5, self) -- Delay to have a better change of getting correct item info
@@ -311,7 +355,9 @@ function RCLootCouncil:OnEnable()
 	self:RegisterBucketEvent("GROUP_ROSTER_UPDATE", 5, "UpdateCandidatesInGroup")
 
 	if IsInGuild() then
-        self.guildName, self.guildRank = GetGuildInfo("player")
+        self.guildName = GetGuildInfo("player")
+        self.guildRank = self:GetPlayersGuildRank()
+        cacheLocalGuildRank(self, self.guildRank)
         self:ScheduleTimer("SendGuildVerTest", 2) -- send out a version check after a delay
 	end
 
@@ -982,10 +1028,22 @@ end
 -- Update player's data which is changable by the player. (specid, equipped ilvl, specs, gears, etc)
 function RCLootCouncil:UpdatePlayersData()
 	self.Log("UpdatePlayersData()")
-	playersData.specID = C_SpecializationInfo and
-	C_SpecializationInfo.GetSpecializationInfo(C_SpecializationInfo.GetSpecialization())
-	or GetSpecialization() and GetSpecializationInfo(GetSpecialization())
-	playersData.ilvl = select(2, GetAverageItemLevel())
+	local getSpec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization
+	local getSpecInfo = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo
+	if getSpec and getSpecInfo then
+		local specIndex = getSpec()
+		playersData.specID = specIndex and getSpecInfo(specIndex) or 0
+	elseif GetSpecialization and GetSpecializationInfo then
+		local specIndex = GetSpecialization()
+		playersData.specID = specIndex and GetSpecializationInfo(specIndex) or 0
+	else
+		playersData.specID = 0
+	end
+	playersData.ilvl = 0
+	if GetAverageItemLevel then
+		local _, equippedIlvl = GetAverageItemLevel()
+		playersData.ilvl = equippedIlvl or 0
+	end
 	self:UpdatePlayersGears()
 end
 
@@ -1225,6 +1283,9 @@ end
 -- Autopass response is sent if the session has been autopassed. No other response is sent.
 -- @param skip Only sends lootAcks on sessions > skip or 0
 function RCLootCouncil:SendLootAck(table, skip)
+	if playersData.specID == nil or playersData.ilvl == nil then
+		self:UpdatePlayersData()
+	end
 	local toSend = {gear1 = {}, gear2 = {}, diff = {}, response = {}, roll = {}}
 	local hasData = false
 	for k, v in pairs(table) do
@@ -1241,7 +1302,7 @@ function RCLootCouncil:SendLootAck(table, skip)
 		end
 	end
 	if not next(toSend.roll) then toSend.roll = nil end
-	if hasData then self:Send("group", "lootAck", playersData.specID, playersData.ilvl, toSend) end
+	if hasData then self:Send("group", "lootAck", playersData.specID or 0, playersData.ilvl or 0, toSend) end
 end
 
 -- Sets lootTable[session].autopass = true if an autopass occurs, and informs the user of the change
@@ -1551,7 +1612,13 @@ function RCLootCouncil:GetPlayerInfo()
 			end
 		end
 	end
-	local ilvl = select(2, GetAverageItemLevel())
+	local ilvl = playersData.ilvl or 0
+	if GetAverageItemLevel then
+		local _, equippedIlvl = GetAverageItemLevel()
+		ilvl = equippedIlvl or ilvl
+	end
+	self.guildRank = self:GetPlayersGuildRank()
+	cacheLocalGuildRank(self, self.guildRank)
 	return self.Utils:GetPlayerRole(), self.guildRank, enchant, lvl, ilvl, playersData.specID
 end
 
@@ -1564,7 +1631,14 @@ end
 ---@param target string? Player name or "group". Defaults to "group".
 function RCLootCouncil:SendPlayerInfo(target)
 	local commsTarget = target and target ~= "group" and Player:Get(target) or "group"
-	Comms:Send { target = commsTarget, command = "pI", data = { self:GetPlayerInfo(), }, }
+	local role, rank, enchanter, lvl, ilvl, specID = self:GetPlayerInfo()
+	if IsInGuild() and isMissingGuildRank(rank) then rank = nil end
+	local rankFallback = IsInGuild() and "Unknown" or L["Unguilded"]
+	Comms:Send {
+		target = commsTarget,
+		command = "pI",
+		data = { role or "NONE", rank or rankFallback, enchanter or false, lvl or 0, ilvl or 0, specID or 0, },
+	}
 end
 
 --- Returns a lookup table containing GuildRankNames and their index.
@@ -1712,7 +1786,12 @@ function RCLootCouncil:OnEvent(event, ...)
 		self.Log:d("Event:", event, ...)
 		self:UpdatePlayersData()
 	elseif event == "GUILD_ROSTER_UPDATE" then
+		local oldGuildRank = self.guildRank
 		self.guildRank = self:GetPlayersGuildRank();
+		cacheLocalGuildRank(self, self.guildRank)
+		if self.guildRank ~= oldGuildRank and (IsInGroup() or self.testMode) then
+			self:SendPlayerInfo(IsInGroup() and "group" or self.playerName)
+		end
 		if unregisterGuildEvent then
 			self:UnregisterEvent("GUILD_ROSTER_UPDATE"); -- we don't need it any more
 			-- v2.9: Handled in options
@@ -2085,6 +2164,45 @@ function RCLootCouncil:IsHistoryEntryAvailableWithMoreInfoSettings(entry)
 	return not next(db.moreInfoRaids) or db.moreInfoRaids[entry.mapID .. "-" .. (entry.difficultyID == 0 and "" or entry.difficultyID)]
 end
 
+local TBCPriorityLootTiers = {
+	p1 = {
+		mapIDs = { [544] = true, [532] = true, [565] = true },
+		instances = { ["magtheridons lair"] = true, ["karazhan"] = true, ["gruuls lair"] = true },
+	},
+	p2 = {
+		mapIDs = { [548] = true, [550] = true },
+		instances = { ["serpentshrine cavern"] = true, ["tempest keep"] = true, ["the eye"] = true },
+	},
+	p3 = {
+		mapIDs = { [534] = true, [564] = true },
+		instances = { ["hyjal summit"] = true, ["the battle for mount hyjal"] = true, ["battle for mount hyjal"] = true, ["black temple"] = true },
+	},
+	p45 = {
+		mapIDs = { [568] = true, [580] = true },
+		instances = { ["zulaman"] = true, ["sunwell plateau"] = true },
+	},
+}
+
+local function NormalizePriorityLootInstance(instance)
+	if type(instance) ~= "string" then return end
+	local base = strsplit("-", instance, 2)
+	return base and base:lower():gsub("'", ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function GetPriorityLootTier(entry)
+	local isAwardReason = entry and (entry.isAwardReason == true or type(entry.isAwardReason) == "string" and entry.isAwardReason:lower() == "true")
+	if not entry or isAwardReason or tonumber(entry.responseID) ~= 1 then return end
+	local mapID = tonumber(entry.mapID)
+	for tier, data in pairs(TBCPriorityLootTiers) do
+		if mapID and data.mapIDs[mapID] then return tier end
+	end
+
+	local instance = NormalizePriorityLootInstance(entry.instance)
+	for tier, data in pairs(TBCPriorityLootTiers) do
+		if instance and data.instances[instance] then return tier end
+	end
+end
+
 --- Returns statistics for use in various detailed views.
 -- @return A table formatted as:
 --[[ @usage lootDBStatistics[candidate_name] = {
@@ -2110,6 +2228,12 @@ end
 				[4] = responseID, -- see index in self.responses. Award reasons gets 100 addded. TierResponses gets 200 added. Relic 300.
 			}
 		},
+		priorityLoot = {
+			p1 = number of Button 1 awards in Magtheridon's Lair, Karazhan and Gruul's Lair,
+			p2 = number of Button 1 awards in Serpentshrine Cavern and Tempest Keep,
+			p3 = number of Button 1 awards in Hyjal Summit and Black Temple,
+			p45 = number of Button 1 awards in Zul'Aman and Sunwell Plateau,
+		},
 		raids = {
 			-- Each index is a unique raid ID made by combining the date and instance
 			[xxx] = number of loot won in this raid,
@@ -2128,10 +2252,15 @@ function RCLootCouncil:GetLootDBStatistics()
 		local entry, id
 		for name, data in pairs(self:GetHistoryDB()) do
 			local count, responseText, color, numTokens, raids = {}, {}, {}, {}, {}
+			local priorityLoot = { p1 = 0, p2 = 0, p3 = 0, p45 = 0 }
 			local lastestAwardFound = 0
 			lootDBStatistics[name] = {}
 			for i = #data, 1, -1 do -- Start from the end
 				entry = data[i]
+				local priorityTier = GetPriorityLootTier(entry)
+				if priorityTier then
+					priorityLoot[priorityTier] = priorityLoot[priorityTier] + 1
+				end
 				if self:IsHistoryEntryAvailableWithMoreInfoSettings(entry) then
 					id = (entry.isAwardReason and "a" or entry.typeCode or "default") .. entry.responseID
 
@@ -2165,6 +2294,7 @@ function RCLootCouncil:GetLootDBStatistics()
 			-- Totals:
 			local totalNum = 0
 			lootDBStatistics[name].totals = {}
+			lootDBStatistics[name].totals.priorityLoot = priorityLoot
 			lootDBStatistics[name].totals.tokens = numTokens
 			lootDBStatistics[name].totals.responses = {}
 			for idx, num in pairs(count) do
@@ -2873,7 +3003,10 @@ function RCLootCouncil:SubscribeToPermanentComms()
 			self:SendPlayerInfo(IsInGroup() and "group" or sender)
 		end,
 
-		pI = function(data, sender) self:OnPlayerInfoReceived(sender, unpack(data)) end,
+		pI = function(data, sender)
+			if type(data) ~= "table" then data = {} end
+			self:OnPlayerInfoReceived(sender, unpack(data, 1, 6))
+		end,
 
 		n_t = function(data, sender, command) self:OnTradeableStatusReceived(sender, "not_tradeable", unpack(data)) end,
 		r_t = function(data, sender, command) self:OnTradeableStatusReceived(sender, "rejected_trade", unpack(data)) end,
@@ -2954,6 +3087,11 @@ function RCLootCouncil:OnCouncilReceived(sender, council)
 end
 
 function RCLootCouncil:OnPlayerInfoReceived(sender, role, rank, enchanter, lvl, ilvl, specID)
+	if self:UnitIsUnit(sender, "player") and IsInGuild() and isMissingGuildRank(rank) then
+		local guildRank = self:GetPlayersGuildRank()
+		rank = not isMissingGuildRank(guildRank) and guildRank or nil
+	end
+	if self:UnitIsUnit(sender, "player") then cacheLocalGuildRank(self, rank) end
 	Player:Get(sender):UpdateFields{
 		role = role,
 		rank = rank,
@@ -2962,6 +3100,10 @@ function RCLootCouncil:OnPlayerInfoReceived(sender, role, rank, enchanter, lvl, 
 		ilvl = ilvl,
 		specID = specID,
 	}
+	local votingFrame = self:GetActiveModule("votingframe")
+	if votingFrame and votingFrame.OnPlayerInfoReceived and votingFrame:IsEnabled() then
+		votingFrame:OnPlayerInfoReceived(sender, role, rank, ilvl, specID)
+	end
 end
 
 function RCLootCouncil:OnTradeableStatusReceived(sender, reason, link)

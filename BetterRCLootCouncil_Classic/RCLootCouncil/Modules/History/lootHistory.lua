@@ -34,6 +34,17 @@ local ROW_HEIGHT = 20;
 local NUM_ROWS = 15;
 local useClassFilters = false
 
+local function RefreshMoreInfoData()
+	moreInfoData = addon:GetLootDBStatistics() or {}
+end
+
+local function GetPriorityLootCount(name, tier)
+	if moreInfoData and moreInfoData[name] and moreInfoData[name].totals and moreInfoData[name].totals.priorityLoot then
+		return moreInfoData[name].totals.priorityLoot[tier] or 0
+	end
+	return 0
+end
+
 LootHistory.wowheadBaseUrl = "https://www.wowhead.com/item="
 
 --globals
@@ -61,6 +72,10 @@ function LootHistory:OnInitialize()
 		{name = "",				width = ROW_HEIGHT, },																				-- Item icon
 		{name = L["Item"],	width = 250, comparesort = self.ItemSort, defaultsort = 1, sortnext = 2},			-- Item string
 		{name = L["Reason"],	width = 220, comparesort = self.ResponseSort,  defaultsort = 1, sortnext = 2},	-- Response aka the text supplied to lootDB...response
+		{name = "P1",			width = 34, defaultsort = 1, sortnext = 2, align = "CENTER"},
+		{name = "P2",			width = 34, defaultsort = 1, sortnext = 2, align = "CENTER"},
+		{name = "P3",			width = 34, defaultsort = 1, sortnext = 2, align = "CENTER"},
+		{name = "P4-5",		width = 40, defaultsort = 1, sortnext = 2, align = "CENTER"},
 		{ name = L["Notes"],  width = 40, },
 		{name = "",				width = ROW_HEIGHT},																					-- Delete button
 	}
@@ -98,7 +113,7 @@ end
 --- Show the LootHistory frame.
 function LootHistory:Show()
 	addon.Log("LootHistory:Show()")
-	moreInfoData = addon:GetLootDBStatistics()
+	RefreshMoreInfoData()
 	self.frame:Show()
 end
 
@@ -170,6 +185,7 @@ end
 
 function LootHistory:BuildData()
 	addon.Log:D("LootHistory:BuildData()")
+	RefreshMoreInfoData()
 	data = {}
 	local date
 	-- We want to rebuild lootDB to the "data" format:
@@ -225,6 +241,10 @@ function LootHistory:BuildData()
 							{DoCellUpdate = self.SetCellGear, args={i.lootWon}},
 							{value = i.lootWon},
 							{DoCellUpdate = self.SetCellResponse, args = {color = i.color, response = i.response, responseID = i.responseID or 0, isAwardReason = i.isAwardReason}},
+							{DoCellUpdate = self.SetCellPriorityLoot, args = {"p1"}, value = GetPriorityLootCount(name, "p1")},
+							{DoCellUpdate = self.SetCellPriorityLoot, args = {"p2"}, value = GetPriorityLootCount(name, "p2")},
+							{DoCellUpdate = self.SetCellPriorityLoot, args = {"p3"}, value = GetPriorityLootCount(name, "p3")},
+							{DoCellUpdate = self.SetCellPriorityLoot, args = {"p45"}, value = GetPriorityLootCount(name, "p45")},
 							{ DoCellUpdate = self.SetCellNote },
 							{DoCellUpdate = self.SetCellDelete},
 						}
@@ -466,6 +486,14 @@ function LootHistory.SetCellResponse(rowFrame, frame, data, cols, row, realrow, 
 	end
 end
 
+function LootHistory.SetCellPriorityLoot(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+	local tier = data[realrow].cols[column].args[1]
+	local value = GetPriorityLootCount(data[realrow].name, tier)
+	frame.text:SetText(value)
+	frame.text:SetTextColor(1, 1, 1, 1)
+	data[realrow].cols[column].value = value
+end
+
 function LootHistory.SetCellNote(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
 	if not data then return end
 	local row = data[realrow]
@@ -514,11 +542,12 @@ function LootHistory.SetCellDelete(rowFrame, frame, data, cols, row, realrow, co
 				end
 			end
 
-			table:SortData()
 			if #lootDB[name] == 0 then -- last entry deleted
 				addon.Log:D("Last Entry deleted, deleting name: ", name)
 				lootDB[name] = nil
 			end
+			RefreshMoreInfoData()
+			table:SortData()
 		else
 			frame.lastClick = GetTime()
 		end
@@ -1366,6 +1395,7 @@ function LootHistory.RightClickMenu(menu, level)
 					lootDB[data.name][data.num].class = data.class
 					data.cols[1].args[1] = v[1].args[1]
 					data.cols[2] = {value = v[2].value, color = addon:GetClassColor(data.class)}
+					RefreshMoreInfoData()
 					LootHistory.frame.st:SortData()
 					addon:SendMessage("RCHistory_NameEdit", data)
 				end
@@ -1390,6 +1420,7 @@ function LootHistory.RightClickMenu(menu, level)
 					data.response = i
 					entry.typeCode = "default"
 					data.cols[6].args = {color = entry.color, response = entry.response, responseID = i}
+					RefreshMoreInfoData()
 					LootHistory.frame.st:SortData()
 					addon:SendMessage("RCHistory_ResponseEdit", data)
 				end
@@ -1420,6 +1451,7 @@ function LootHistory.RightClickMenu(menu, level)
 							data.response = i
 							entry.typeCode = k
 							data.cols[6].args = {color = entry.color, response = entry.response, responseID = i}
+							RefreshMoreInfoData()
 							LootHistory.frame.st:SortData()
 							addon:SendMessage("RCHistory_ResponseEdit", data)
 						end
@@ -1444,6 +1476,7 @@ function LootHistory.RightClickMenu(menu, level)
 							entry.typeCode = "default"
 							data.response = k
 							data.cols[6].args = {color = entry.color, response = entry.response, responseID = k}
+							RefreshMoreInfoData()
 							LootHistory.frame.st:SortData()
 						end
 						MSA_DropDownMenu_AddButton(info, level)
@@ -1468,6 +1501,7 @@ function LootHistory.RightClickMenu(menu, level)
 					entry.relicRoll = nil
 					data.response = i
 					data.cols[6].args = {color = entry.color, response = entry.response, responseID = k}
+					RefreshMoreInfoData()
 					LootHistory.frame.st:SortData()
 					addon:SendMessage("RCHistory_ResponseEdit", data)
 				end

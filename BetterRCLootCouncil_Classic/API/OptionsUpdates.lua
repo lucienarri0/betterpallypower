@@ -1,10 +1,10 @@
 --- Includes all changes to the options menu for Classic
 --- @type RCLootCouncil
 local addon = select(2, ...)
----@type RCLootCouncil_Classic
+---@type BetterRCLootCouncil_Classic
 local RCClassic = addon:GetModule("RCClassic")
 local L = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil")
-local LC = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil_Classic")
+local LC = LibStub("AceLocale-3.0"):GetLocale("BetterRCLootCouncil_Classic")
 
 local old_options_func = addon.OptionsTable
 function addon:OptionsTable()
