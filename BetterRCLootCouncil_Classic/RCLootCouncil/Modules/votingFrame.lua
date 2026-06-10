@@ -51,6 +51,10 @@ local sessionButtons = {}
 local moreInfo = false -- Show more info frame?
 local active = false -- Are we currently in session?
 local menuFrame -- Right click menu frame
+
+local function isMissingGuildRank(rank)
+	return not rank or rank == L["Unguilded"] or rank == L["Not Found"] or rank == "Unknown"
+end
 local filterMenu -- Filter drop down menu
 local enchanters -- Enchanters drop down menu frame
 local guildRanks = {} -- returned from addon:GetGuildRanks()
@@ -81,6 +85,10 @@ function RCVotingFrame:OnInitialize()
 		{ name = L["Vote"],		DoCellUpdate = RCVotingFrame.SetCellVote,			colName = "vote",		sortnext = 10,		width = 60, align = "CENTER", },				-- 11 Vote button
 		{ name = L["Notes"],		DoCellUpdate = RCVotingFrame.SetCellNote,			colName = "note",								width = 50, align = "CENTER", },				-- 12 Note icon
 		{ name = _G.ROLL,			DoCellUpdate = RCVotingFrame.SetCellRoll, 		colName = "roll",		sortnext = 10,		width = 50, align = "CENTER", },				-- 13 Roll
+		{ name = "P1",			DoCellUpdate = RCVotingFrame.SetCellPriorityLoot,	colName = "p1",		sortnext = 2,		width = 34, align = "CENTER", },
+		{ name = "P2",			DoCellUpdate = RCVotingFrame.SetCellPriorityLoot,	colName = "p2",		sortnext = 2,		width = 34, align = "CENTER", },
+		{ name = "P3",			DoCellUpdate = RCVotingFrame.SetCellPriorityLoot,	colName = "p3",		sortnext = 2,		width = 34, align = "CENTER", },
+		{ name = "P4-5",			DoCellUpdate = RCVotingFrame.SetCellPriorityLoot,	colName = "p45",	sortnext = 2,		width = 40, align = "CENTER", },
 		-- { name = "",				DoCellUpdate = RCVotingFrame.SetCellCorruption, colName = "corruption", sortnext = 10, width = 30, align = "CENTER",},				-- 14 Corruption (Patch 8.3)
 	}
 	-- The actual table being worked on, new entries should be added to this table "tinsert(RCVotingFrame.scrollCols, data)"
@@ -159,7 +167,8 @@ function RCVotingFrame:RegisterComms ()
 			end
 		end,
 		lootAck = function (data, sender)
-			self:OnLootAckReceived(sender, unpack(data))
+			if type(data) ~= "table" then data = {} end
+			self:OnLootAckReceived(sender, unpack(data, 1, 3))
 		end,
 		awarded = function (data, sender)
 			if addon:IsMasterLooter(sender) then
@@ -387,9 +396,20 @@ end
 function RCVotingFrame:SetupCandidate(t, name,response)
 	local player = Player:Get(name)
 	name = player and player.name or name
+	local rank = player.rank
+	if addon:UnitIsUnit(name, "player") then
+		local guildRank = addon.guildRank
+		if IsInGuild() and isMissingGuildRank(guildRank) then
+			guildRank = addon:GetPlayersGuildRank()
+			addon.guildRank = guildRank
+		end
+		if isMissingGuildRank(rank) or not isMissingGuildRank(guildRank) then
+			rank = guildRank
+		end
+	end
 	t.candidates[name] = {
 		class = player.class or "Unknown",
-		rank = player.rank or "Unknown",
+		rank = IsInGuild() and addon:UnitIsUnit(name, "player") and isMissingGuildRank(rank) and "Unknown" or rank or "Unknown",
 		role = player.role or "NONE",
 		response = response,
 		ilvl = "",
@@ -575,18 +595,25 @@ function RCVotingFrame:OnChangeToWaitReceived(data)
 end
 
 function RCVotingFrame:OnLootAckReceived (name, specID, ilvl, sessionData)
+	if type(sessionData) ~= "table" then
+		addon.Log:W("Handling lootAck without session data from", name)
+		sessionData = {}
+	end
+	sessionData.response = sessionData.response or {}
 	for k,d in pairs(sessionData) do
-		for ses, v in pairs(d) do
-			if k == "gear1" or k == "gear2" then
-				self:SetCandidateData(ses, name, k, ItemUtils:UncleanItemString(v))
-			else
-				self:SetCandidateData(ses, name, k, v)
+		if type(d) == "table" then
+			for ses, v in pairs(d) do
+				if k == "gear1" or k == "gear2" then
+					self:SetCandidateData(ses, name, k, ItemUtils:UncleanItemString(v))
+				else
+					self:SetCandidateData(ses, name, k, v)
+				end
 			end
 		end
 	end
 	for i = 1, #lootTable do
-		self:SetCandidateData(i, name, "specID", specID)
-		self:SetCandidateData(i, name, "ilvl", ilvl)
+		if specID ~= nil then self:SetCandidateData(i, name, "specID", specID) end
+		if ilvl ~= nil then self:SetCandidateData(i, name, "ilvl", ilvl) end
 		if not sessionData.response[i] then
 			-- We might already have an response, so don't override unless it's announced
 			if self:GetCandidateData(i, name, "response") == "ANNOUNCED" then
@@ -602,10 +629,35 @@ function RCVotingFrame:OnLootAckReceived (name, specID, ilvl, sessionData)
 	end
 end
 
+function RCVotingFrame:OnPlayerInfoReceived(name, role, rank, ilvl, specID)
+	local changed
+	for i = 1, #lootTable do
+		if lootTable[i].candidates and lootTable[i].candidates[name] then
+			local candidate = lootTable[i].candidates[name]
+			local candidateRank = candidate.rank
+			if addon:UnitIsUnit(name, "player") and IsInGuild() then
+				if isMissingGuildRank(rank) then
+					rank = not isMissingGuildRank(addon.guildRank) and addon.guildRank or nil
+				end
+				if isMissingGuildRank(rank) and isMissingGuildRank(candidateRank) then
+					candidateRank = "Unknown"
+				end
+			end
+			self:SetCandidateData(i, name, "role", role or candidate.role or "NONE")
+			self:SetCandidateData(i, name, "rank", rank or candidateRank or "Unknown")
+			if ilvl then self:SetCandidateData(i, name, "ilvl", ilvl) end
+			if specID then self:SetCandidateData(i, name, "specID", specID) end
+			changed = true
+		end
+	end
+	if changed then self:Update() end
+end
+
 function RCVotingFrame:OnAwardedReceived (s, winner)
 	self:ScheduleTimer(function()
 		moreInfoData = addon:GetLootDBStatistics() -- Just update it on every award
 		self:UpdateItemAwardHistory()
+		self:Update(true)
 	end, 1) -- Make sure we've received the history data before updating
 	if not lootTable[s] then return end -- We might not have lootTable - e.g. if we just reloaded
 	local oldWinner = lootTable[s].awarded
@@ -641,6 +693,7 @@ function RCVotingFrame:OnBaggedReceived (s)
 	self:ScheduleTimer(function()
 		moreInfoData = addon:GetLootDBStatistics() -- Just update it on every award
 		self:UpdateItemAwardHistory()
+		self:Update(true)
 	end, 1) -- Make sure we've received the history data before updating
 	if not lootTable[s] then return end -- We might not have lootTable - e.g. if we just reloaded
 	lootTable[s].baggedInSession = true
@@ -1836,6 +1889,18 @@ function RCVotingFrame.SetCellRoll(rowFrame, frame, data, cols, row, realrow, co
 	local name = data[realrow].name
 	frame.text:SetText(lootTable[session].candidates[name].roll or "")
 	data[realrow].cols[column].value = lootTable[session].candidates[name].roll or ""
+end
+
+function RCVotingFrame.SetCellPriorityLoot(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+	local name = data[realrow].name
+	local colName = data[realrow].cols[column].colName
+	local value = 0
+	if moreInfoData and moreInfoData[name] and moreInfoData[name].totals and moreInfoData[name].totals.priorityLoot then
+		value = moreInfoData[name].totals.priorityLoot[colName] or 0
+	end
+	frame.text:SetText(value)
+	frame.text:SetTextColor(1, 1, 1, 1)
+	data[realrow].cols[column].value = value
 end
 
 function RCVotingFrame.filterFunc(table, row)

@@ -2,15 +2,26 @@
 --- Fixed for retail RCLootCouncil function that doesn't function properly in Classic
 ---@class RCLootCouncil
 local addon = select(2, ...)
----@type RCLootCouncil_Classic
+---@type BetterRCLootCouncil_Classic
 local Classic = addon:GetModule("RCClassic")
 local private = {}
 local L = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil")
-local LC = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil_Classic")
+local LC = LibStub("AceLocale-3.0"):GetLocale("BetterRCLootCouncil_Classic")
 local LibDialog = LibStub("LibDialog-1.1")
 
 local ItemUtils = addon.Require "Utils.Item"
 local Player = addon.Require "Data.Player"
+local orig_GetGear = addon.GetGear
+
+local function isMissingGuildRank(rank)
+	return not rank or rank == L["Unguilded"] or rank == L["Not Found"] or rank == "Unknown"
+end
+
+local function cacheLocalGuildRank(self, rank)
+	if not isMissingGuildRank(rank) and self.playerName then
+		Player:Get(self.playerName):UpdateFields{ rank = rank }
+	end
+end
 
 ----------------------------------------------
 -- Core
@@ -69,7 +80,7 @@ if Classic:IsPreMists() then
 end
 
 -- Update logo location
-addon.LOGO_LOCATION = "Interface/AddOns/RCLootCouncil_Classic/RCLootCouncil/Media/rc_banner"
+addon.LOGO_LOCATION = "Interface/AddOns/BetterRCLootCouncil_Classic/RCLootCouncil/Media/rc_banner"
 
 -- Ignored Items
 addon.defaults.profile.ignoredItems = {}          -- Remove the retail ones
@@ -93,8 +104,10 @@ end
 function addon:UpdatePlayersData()
 	Classic.Log:D("UpdatePlayersData()")
 	-- GetSpecialization doesn't exist pre mists
-	self.playersData.specID = C_SpecializationInfo.GetSpecialization and (C_SpecializationInfo.GetSpecializationInfo(
-	C_SpecializationInfo.GetSpecialization())) or 0
+	local getSpec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization
+	local getSpecInfo = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo
+	local specIndex = getSpec and getSpec()
+	self.playersData.specID = specIndex and getSpecInfo and getSpecInfo(specIndex) or 0
 	self.playersData.ilvl = private.GetAverageItemLevel()
 
 	self:UpdatePlayersGears()
@@ -195,8 +208,12 @@ function addon:GetGear(link, equipLoc)
 	local itemID = ItemUtils:GetItemIDFromLink(link)
 	if Classic.Lists.Specials[itemID] then
 		return getGearForTokens(itemID)
+	elseif self.playersData and self.playersData.gears then
+		return self:GetPlayersGear(link, equipLoc, self.playersData.gears) -- Use gear info we stored before
+	elseif orig_GetGear then
+		return orig_GetGear(self, link, equipLoc)
 	else
-		return self:GetPlayersGear(link, equipLoc, addon.playersData.gears) -- Use gear info we stored before
+		return self:GetPlayersGear(link, equipLoc)
 	end
 end
 
@@ -381,6 +398,8 @@ if Classic:IsClassicEra() then -- Vanilla has old way of getting professions
 		end
 		-- GetAverageItemLevel() isn't implemented
 		local ilvl = private.GetAverageItemLevel()
+		self.guildRank = self:GetPlayersGuildRank()
+		cacheLocalGuildRank(self, self.guildRank)
 		return self.Utils:GetPlayerRole(), self.guildRank, enchant, lvl, ilvl, nil                                                                                                      --self.playersData.specID
 	end
 end
@@ -406,5 +425,6 @@ function private.GetAverageItemLevel()
 			count = count + 1
 		end
 	end
+	if count == 0 then return 0 end
 	return addon.round(sum / count, 2)
 end

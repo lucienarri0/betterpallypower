@@ -1,6 +1,6 @@
 --- Adds and changes button groups for Classic
 local _, addon = ...
-local LC = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil_Classic")
+local LC = LibStub("AceLocale-3.0"):GetLocale("BetterRCLootCouncil_Classic")
 
 addon.OPT_MORE_BUTTONS_VALUES.CATALYST = nil
 addon.OPT_MORE_BUTTONS_VALUES.SPECIAL = nil

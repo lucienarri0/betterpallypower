@@ -1,13 +1,13 @@
 ---@class RCLootCouncil : AceAddon-3.0, AceConsole-3.0, AceEvent-3.0, AceHook-3.0, AceTimer-3.0, AceBucket-3.0
-local addon = select(2, ...)
+local addonName, addon = ...
 
----@class RCLootCouncil_Classic : AceModule, AceHook-3.0, AceEvent-3.0, AceTimer-3.0
+---@class BetterRCLootCouncil_Classic : AceModule, AceHook-3.0, AceEvent-3.0, AceTimer-3.0
 local ClassicModule = addon:NewModule("RCClassic", "AceHook-3.0", "AceEvent-3.0", "AceTimer-3.0")
 local L = LibStub("AceLocale-3.0"):GetLocale("RCLootCouncil")
 
 local Council = addon.Require "Data.Council"
 function ClassicModule:OnInitialize()
-	self.version = C_AddOns.GetAddOnMetadata("RCLootCouncil_Classic", "Version")
+	self.version = C_AddOns.GetAddOnMetadata(addonName, "Version")
 	self.tVersion = "Beta.1"
 	self.debug = false
 	self.nnp = false
@@ -57,7 +57,7 @@ function ClassicModule:OnEnable()
 	self:RegisterEvent("LOOT_CLOSED", "LootClosed")
 
 	-- Version checker should handle Classic Module, as it's lifted to be the main version.
-	-- Not doing this would result in both `RCLootCouncil` and `module RCLootCouncil_Classic` is outdated prints.
+	-- Not doing this would result in both `RCLootCouncil` and `module BetterRCLootCouncil_Classic` is outdated prints.
 	addon:GetActiveModule("version").moduleVerCheckDisplayed[self.baseName] = true
 end
 

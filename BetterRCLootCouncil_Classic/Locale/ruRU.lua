@@ -1,7 +1,7 @@
 -- Translate RCLootCouncil Classic to your language at:
 -- https://www.curseforge.com/wow/addons/rclootcouncil-classic/localization
 
-local L = LibStub("AceLocale-3.0"):NewLocale("RCLootCouncil_Classic", "ruRU")
+local L = LibStub("AceLocale-3.0"):NewLocale("BetterRCLootCouncil_Classic", "ruRU")
 if not L then return end
 
 L["ALWAYS_AUTO_AWARD_OPTION"] = "Всегда автоматически награждать"

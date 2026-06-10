@@ -1,14 +1,14 @@
 ## Author: Potdisc
 ## Interface: 11508, 20505, 50504
-## Notes: RCLootCouncil for WoW Classic v1.4.1
-## Title: RCLootCouncil Classic
+## Notes: BetterRCLootCouncil for WoW Classic v1.4.1
+## Title: BetterRCLootCouncil Classic
 ## Version: 1.4.1
 ## AllowLoadGameType: classic
 ## X-Curse-Project-ID: 332955
 ## X-Wago-ID: J96ExYNg
-## SavedVariables: RCLootCouncilDB, RCLootCouncilLootDB
+## Dependencies: RCLootCouncil_Classic
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3, lib-st, LibWindow-1.1, LibDialog-1.0
-## IconTexture: Interface\AddOns\RCLootCouncil\Media\logo
+## IconTexture: Interface\AddOns\BetterRCLootCouncil_Classic\RCLootCouncil\Media\logo
 ## Category-enUS: Loot
 ## Category-deDE: Beute
 ## Category-esES: Botín
